@@ -40,6 +40,15 @@ end
 
 
 
+function printlnr(r)
+    println(r)
+end
+function printlnr(r::String)
+    println("\"$r\"")
+end
+
+
+
 function metajulia_repl()
     println("MetaJulia REPL. Type \"exit\" to quit.")
     while true
@@ -56,7 +65,7 @@ function metajulia_repl()
         # Evaluate the AST and print the result
         if isa(ast, Expr) || isa(ast, Number) || isa(ast, String) || isa(ast, Symbol)
             result = evaluate(ast)
-            println(result)
+            printlnr(result)
         # Unsupported AST types
         else
             error("Unsupported AST node type: $(typeof(ast))")
