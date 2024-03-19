@@ -32,6 +32,13 @@ function evaluate(ast)
         elseif ast.head == :&&
             return evaluate(ast.args[1]) && evaluate(ast.args[2])
             # Unsupported expressions
+        elseif ast.head == :block
+            #TODO: This might need improvement (passing the state)
+            val = nothing
+            for i in ast.args
+                val = evaluate(i)
+            end
+            return val
         else
             error("Unsupported expression type: $(ast.head)")
         end
