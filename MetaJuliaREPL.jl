@@ -12,7 +12,7 @@ global_env = Dict{String,Any}("#" => nothing)
 # -------------------------------------------------
 
 debug = true # Debug messages for environment
-# change it to false if you want to deisable it
+# change it to false if you want to disable it
 
 # TODO remove this later
 function print_aditional_debug_info(node, prefix="")
@@ -37,6 +37,9 @@ function evaluate(node, env::Dict)
     debug && println("[DEBUG] ENV: $(env)")
 
     if isa(node, Number) || isa(node, String) # Literals
+        return node
+
+    elseif isa(node, QuoteNode) # Reflection
         return node
 
     elseif isa(node, Symbol) # Variables
@@ -93,6 +96,11 @@ function evaluate(node, env::Dict)
             value = evaluate(node.args[2], env)
             addBindingToEnv(env, name, value)
             return value
+
+        elseif node.head == :quote
+            value = Meta.parse(reflect(node.args[1], env))
+            return Expr(:quote, value)
+
         else
             error("Unsupported expression type: $(node.head)")
         end
@@ -103,6 +111,17 @@ function evaluate(node, env::Dict)
         debug && println("[DEBUG] ENV: $(env))")
         value = getVariableValue(string(node), env)
         return  isnothing(value) ? error("Symbol is not defined") : value
+    end
+end
+
+
+function reflect(node, env::Dict) # Used for reflection to avoid evaluation of calls
+    if isa(node, Symbol) || isa(node, Number) || isa(node, String)
+        return string(node)
+    elseif node.head == :($)
+        return string(evaluate(node.args[1], env))
+    elseif isa(node, Expr)
+        return "(" * reflect(node.args[2], env) * string(node.args[1]) * reflect(node.args[3], env) * ")"
     end
 end
 
@@ -124,7 +143,7 @@ function metajulia_repl()
         # TODO remove this later
         print_aditional_debug_info(node, "node")
 
-        if isa(node, Expr) || isa(node, Number) || isa(node, String) || isa(node, Symbol)
+        if isa(node, Expr) || isa(node, Number) || isa(node, String) || isa(node, Symbol) || isa(node, QuoteNode)
             # Evaluate the AST and print the result
             result = evaluate(node,global_env)
             isa(result, String) ? println("\"$(result)\"") : println(result)
