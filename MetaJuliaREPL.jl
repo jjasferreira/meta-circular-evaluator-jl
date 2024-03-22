@@ -160,6 +160,12 @@ function metajulia_repl()
         node = Meta.parse(input)
         Base.remove_linenums!(node)
 
+        while node.head == :incomplete
+            new_input = readline()
+            input = input * "\n" * new_input
+            node = Meta.parse(input)
+        end
+
         DEBUG_NODE && print_node(node, "node")
 
         if isa(node, Expr) || isa(node, Number) || isa(node, String) || isa(node, Symbol) || isa(node, QuoteNode)
