@@ -75,7 +75,8 @@ function evaluate(node, env::Dict)
             return evaluate(node.args[1],env) ? evaluate(node.args[2],env) : evaluate(node.args[3],env)
 
         elseif node.head == :block
-            #TODO: This might need improvement (passing the state)
+            # julia seems to be defining the block in the current scope
+            # so no need to create a new env
             val = nothing
             for arg in node.args
                 val = evaluate(arg,env)
@@ -126,7 +127,7 @@ function metajulia_repl()
         if isa(node, Expr) || isa(node, Number) || isa(node, String) || isa(node, Symbol)
             # Evaluate the AST and print the result
             result = evaluate(node,global_env)
-            isa(result, String) ? println("\"$r\"") : println(result)
+            isa(result, String) ? println("\"$(result)\"") : println(result)
 
         else # Unsupported AST node types
             error("Unsupported AST node type: $(typeof(node))")
