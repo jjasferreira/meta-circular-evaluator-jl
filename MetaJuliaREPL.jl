@@ -1,5 +1,4 @@
 module MetaJuliaREPL
-export metajulia_repl
 
 include("Environment.jl")
 using .Environment
@@ -11,20 +10,19 @@ global_env = Dict{String,Any}("#" => nothing)
 # DEBUG
 # -------------------------------------------------
 
-debug = true # Debug messages for environment
-# change it to false if you want to disable it
+DEBUG_ENV = false
+DEBUG_NODE = true
 
-# TODO remove this later
-function print_aditional_debug_info(node, prefix="")
-    println("$prefix type: $(typeof(node))")
+function print_node(node, prefix="")
+    println("[DEBUG] $prefix type: $(typeof(node))")
     if isa(node, Expr)
-        println("$prefix head: $(node.head)")
-        println("$prefix args: $(node.args)")
+        println("[DEBUG] $prefix head: $(node.head)")
+        println("[DEBUG] $prefix args: $(node.args)")
         for (i, arg) in enumerate(node.args)
-            print_aditional_debug_info(arg, "$prefix arg$i ")
+            print_node(arg, "$prefix arg$i ")
         end
     else
-        println("$prefix value: $node")
+        println("[DEBUG] $prefix value: $node")
     end
 end
 
@@ -34,7 +32,6 @@ end
 # -------------------------------------------------
 
 function evaluate(node, env::Dict)
-    debug && println("[DEBUG] ENV: $(env)")
 
     if isa(node, Number) || isa(node, String) # Literals
         return node
@@ -48,9 +45,6 @@ function evaluate(node, env::Dict)
         return isnothing(result) ? error("Name not found: $name") : result
 
     elseif isa(node, Expr) # Expressions
-        Base.remove_linenums!(node)
-        debug && println("[DEBUG] AST head type: $(node.head)") # rm line
-        debug && println("[DEBUG] AST args: $(node.args)") # rm line
         if node.head == :call  # Function calls
             op = node.args[1]
             args = map(x -> evaluate(x, env), node.args[2:end])
@@ -66,36 +60,63 @@ function evaluate(node, env::Dict)
                 return args[1] > args[2]
             elseif op == :<
                 return args[1] < args[2]
+
+                # x(5)       [x, 5]
+            elseif haskey(env, string(op))  # Defined functions
+                # env = ("x" => ("args" => ["y"], "body" => quote y + 1 end))
+                func = env[string(op)]
+                # func = ("args" => ["y"], "body" => quote y + 1 end)
+                func_args = func["args"]
+                func_body = func["body"]
+                # execute the func_body with func_args substituted with args
+                inner = newEnv(env)
+                for (i, arg) in enumerate(func_args)
+                    addBindingToEnv(inner, arg, args[i]) #inner: ("y" => 5)
+                end
+                return evaluate(func_body, inner)
+
             else
                 error("Unsupported operation: $op")
             end
         elseif node.head == :||
-            return evaluate(node.args[1],env) || evaluate(node.args[2],env)
+            return evaluate(node.args[1], env) || evaluate(node.args[2], env)
         elseif node.head == :&&
-            return evaluate(node.args[1],env) && evaluate(node.args[2],env)
+            return evaluate(node.args[1], env) && evaluate(node.args[2], env)
 
         elseif node.head == :if
-            return evaluate(node.args[1],env) ? evaluate(node.args[2],env) : evaluate(node.args[3],env)
+            return evaluate(node.args[1], env) ? evaluate(node.args[2], env) : evaluate(node.args[3], env)
 
         elseif node.head == :block
-            # julia seems to be defining the block in the current scope
-            # so no need to create a new env
             val = nothing
             for arg in node.args
-                val = evaluate(arg,env)
+                val = evaluate(arg, env)
             end
             return val
 
         elseif node.head == :let
-            localScope = newEnv(env)
-            evaluate(node.args[1], localScope) # assignment phase
-            return evaluate(node.args[2],localScope) # block phase
+            inner = newEnv(env)
+            evaluate(node.args[1], inner) # assignment phase
+            return evaluate(node.args[2], inner) # block phase
 
         elseif node.head == :(=)
-            name = string(node.args[1])
-            value = evaluate(node.args[2], env)
-            addBindingToEnv(env, name, value)
-            return value
+            if isa(node.args[1], Symbol)    # is a Variable
+                name = string(node.args[1])
+                value = evaluate(node.args[2], env)
+                addBindingToEnv(env, name, value)
+                DEBUG_ENV && println("[DEBUG] environment: $(env)")
+                return value
+            elseif isa(node.args[1], Expr) && node.args[1].head == :call    # is a Function
+                name = string(node.args[1].args[1])
+                func = Dict{String,Any}()
+                func["args"] = []
+                for arg in node.args[1].args[2:end]
+                    push!(func["args"], string(arg))
+                end
+                func["body"] = node.args[2]
+                addBindingToEnv(env, name, func)
+                DEBUG_ENV && println("[DEBUG] environment: $(env)")
+                return "<function>"
+            end
 
         elseif node.head == :quote
             value = Meta.parse(reflect(node.args[1], env))
@@ -107,10 +128,8 @@ function evaluate(node, env::Dict)
     else
         #! MARTELADA - Não sabemos bem o que isto é
         #TODO: Maybe precisamos de um if para garantir que é uma var
-        debug && println("[DEBUG] Variable to check: $(node)")
-        debug && println("[DEBUG] ENV: $(env))")
-        value = getVariableValue(string(node), env)
-        return  isnothing(value) ? error("Symbol is not defined") : value
+        value = getEnvBinding(string(node), env)
+        return isnothing(value) ? error("Symbol is not defined") : value
     end
 end
 
@@ -137,15 +156,15 @@ function metajulia_repl()
             println("Exiting MetaJulia REPL.")
             break
         end
-        # Parse the input into an Abstract Syntax Tree node
+        # Parse the input into an Abstract Syntax Tree node and remove line numbers
         node = Meta.parse(input)
+        Base.remove_linenums!(node)
 
-        # TODO remove this later
-        print_aditional_debug_info(node, "node")
+        DEBUG_NODE && print_node(node, "node")
 
         if isa(node, Expr) || isa(node, Number) || isa(node, String) || isa(node, Symbol) || isa(node, QuoteNode)
             # Evaluate the AST and print the result
-            result = evaluate(node,global_env)
+            result = evaluate(node, global_env)
             isa(result, String) ? println("\"$(result)\"") : println(result)
 
         else # Unsupported AST node types
@@ -155,3 +174,5 @@ function metajulia_repl()
 end
 
 end # module MetaJuliaREPL
+
+metajulia_repl() = Main.MetaJuliaREPL.metajulia_repl()
