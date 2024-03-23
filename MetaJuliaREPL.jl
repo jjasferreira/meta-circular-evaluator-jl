@@ -5,13 +5,12 @@ using .Environment
 
 global_env = Dict{String,Any}("#" => nothing)
 
-
 # -------------------------------------------------
 # DEBUG
 # -------------------------------------------------
 
-DEBUG_ENV = true
-DEBUG_NODE = true
+DEBUG_ENV = false
+DEBUG_NODE = false
 
 function print_node(node, prefix="")
     println("[DEBUG] $prefix type: $(typeof(node))")
@@ -26,9 +25,8 @@ function print_node(node, prefix="")
     end
 end
 
-
 # -------------------------------------------------
-# AST and Parser
+# EVALUATE
 # -------------------------------------------------
 
 function evaluate(node, env::Dict)
@@ -74,24 +72,27 @@ function evaluate(node, env::Dict)
                 elseif call == :(==)
                     return args[1] == args[2]
 
-                elseif haskey(env, string(call))  # Defined functions
+                elseif hasEnvBinding(env, string(call)) # Defined functions
                     func = evaluate(call, env)
                     temp = newEnv(env)
                     # adapt to the number of function parameters (single or multiple or zero)
                     params = func.args[1] isa Symbol ? [func.args[1]] : func.args[1].args
                     for (param, arg) in zip(params, args)
-                        addBindingToEnv(temp, string(param), arg)
+                        addEnvBinding(temp, string(param), arg)
                     end
+                    DEBUG_ENV && println("[DEBUG] temp: $(temp)")
                     return evaluate(func.args[2], temp)
                 end
+
             elseif call isa Expr
                 if call.head == :->     # Anonymous functions
                     temp = newEnv(env)
                     # adapt to the number of function parameters (single or multiple or zero)
                     params = call.args[1] isa Symbol ? [call.args[1]] : call.args[1].args
                     for (param, arg) in zip(params, args)
-                        addBindingToEnv(temp, string(param), arg)
+                        addEnvBinding(temp, string(param), arg)
                     end
+                    DEBUG_ENV && println("[DEBUG] temp: $(temp)")
                     return evaluate(call.args[2], temp)
                 end
 
@@ -122,8 +123,8 @@ function evaluate(node, env::Dict)
             if node.args[1] isa Symbol    # is a Variable
                 name = string(node.args[1])
                 value = evaluate(node.args[2], env)
-                addBindingToEnv(env, name, value)
-                DEBUG_ENV && println("[DEBUG] environment: $(env)")
+                addEnvBinding(env, name, value)
+                DEBUG_ENV && println("[DEBUG] env: $(env)")
                 return value
             elseif node.args[1] isa Expr && node.args[1].head == :call    # is a Function
                 name = string(node.args[1].args[1])
@@ -134,8 +135,8 @@ function evaluate(node, env::Dict)
                 else        # multiple or zero function parameters
                     lambda = Expr(:->, Expr(:tuple, params...), body, "func")
                 end
-                addBindingToEnv(env, name, lambda)
-                DEBUG_ENV && println("[DEBUG] environment: $(env)")
+                addEnvBinding(env, name, lambda)
+                DEBUG_ENV && println("[DEBUG] env: $(env)")
                 return Symbol("<function>")
             end
 
@@ -148,8 +149,8 @@ function evaluate(node, env::Dict)
             else        # multiple or zero function parameters
                 lambda = Expr(:->, Expr(:tuple, params...), body, "fexpr")
             end
-            addBindingToEnv(env, name, lambda)
-            DEBUG_ENV && println("[DEBUG] environment: $(env)")
+            addEnvBinding(env, name, lambda)
+            DEBUG_ENV && println("[DEBUG] env: $(env)")
             return Symbol("<fexpr>")
 
         elseif node.head == :quote
@@ -175,43 +176,43 @@ function reflect(node, env::Dict) # Used for reflection to avoid evaluation of c
     end
 end
 
+# -------------------------------------------------
+# PARSER
+# -------------------------------------------------
 
-
-function metajulia_repl()
-    println("MetaJulia REPL. Type \"exit\" to quit.")
-    while true
-
+function parse_input()
+    input = ""
+    while input == ""
         print(">> ")
         input = readline()
-        if input == "exit"
-            println("Exiting MetaJulia REPL.")
-            break
-        end
-        # Parse the input into an Abstract Syntax Tree node and remove line numbers
+    end
+    node = Meta.parse(input)
+    while node isa Expr && node.head == :incomplete
+        print("   ")
+        input *= "\n" * readline()
         node = Meta.parse(input)
-        Base.remove_linenums!(node)
-        if !(node isa String) && !(node isa Number) && !(node isa Symbol) 
-            while node.head == :incomplete
-                new_input = readline()
-                input = input * "\n" * new_input
-                node = Meta.parse(input)
-            end
-        end
+    end
+    Base.remove_linenums!(node)
+    return node
+end
 
+function metajulia_repl()
+    while true
+        node = parse_input()
         DEBUG_NODE && print_node(node, "node")
 
         if node isa Expr || node isa Number || node isa String || node isa Symbol || node isa QuoteNode
-            # Evaluate the AST and print the result
+            # Evaluate the node and print the result
             result = evaluate(node, global_env)
             result isa String ? println("\"$(result)\"") : println(result)
 
-        else # Unsupported AST node types
-            error("Unsupported AST node type: $(typeof(node))")
+        else
+            error("Unsupported node type: $(typeof(node))")
         end
     end
 end
 
-metajulia_repl()
+#metajulia_repl()
 
 end # module MetaJuliaREPL
 

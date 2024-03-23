@@ -4,7 +4,7 @@
 # ------------------------------------------------------------------------------
 
 module Environment
-export newEnv, addBindingToEnv, getEnvBinding
+export newEnv, addEnvBinding, hasEnvBinding, getEnvBinding
 
 
 
@@ -16,8 +16,19 @@ end
 
 
 """Adds or replaces a binding to a name in the environment"""
-function addBindingToEnv(env::Dict, name::String, node::Any)
+function addEnvBinding(env::Dict, name::String, node::Any)
     env[name] = node
+end
+
+
+"""Checks if a name is bound in the environment"""
+function hasEnvBinding(env::Dict, name::String)
+    if haskey(env, name)
+        return true
+    elseif isnothing(env["#"])
+        return false
+    end
+    return hasEnvBinding(env["#"], name)
 end
 
 
