@@ -123,7 +123,7 @@ function evaluate(node, env::Dict)
                 end
                 addBindingToEnv(env, name, lambda)
                 DEBUG_ENV && println("[DEBUG] environment: $(env)")
-                return "<function>"
+                return Symbol("<function>")
             end
 
         elseif node.head == :quote
@@ -164,11 +164,12 @@ function metajulia_repl()
         # Parse the input into an Abstract Syntax Tree node and remove line numbers
         node = Meta.parse(input)
         Base.remove_linenums!(node)
-
-        while node.head == :incomplete
-            new_input = readline()
-            input = input * "\n" * new_input
-            node = Meta.parse(input)
+        if !(node isa String) && !(node isa Number) && !(node isa Symbol) 
+            while node.head == :incomplete
+                new_input = readline()
+                input = input * "\n" * new_input
+                node = Meta.parse(input)
+            end
         end
 
         DEBUG_NODE && print_node(node, "node")
