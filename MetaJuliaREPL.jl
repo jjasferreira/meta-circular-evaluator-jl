@@ -71,6 +71,22 @@ function evaluate(node, env::Dict)
                     return args[1] < args[2]
                 elseif call == :(==)
                     return args[1] == args[2]
+                elseif call == :(eval)
+                    if args[1].head == :call
+                        return evaluate(args[1], env)
+                    elseif args[1].head == :quote
+                        return evaluate(args[1].args[1], env)
+                    end
+                elseif call == :(println)
+                    final = string()
+                    for arg in args
+                        if arg isa Expr && arg.head == :quote
+                            final = final * string(arg.args[1])
+                        else 
+                            final = final * string(arg)
+                        end
+                    end
+                    println(final)
 
                 elseif hasEnvBinding(env, string(call)) # Defined functions
                     func = evaluate(call, env)
@@ -212,7 +228,7 @@ function metajulia_repl()
     end
 end
 
-#metajulia_repl()
+metajulia_repl()
 
 end # module MetaJuliaREPL
 
