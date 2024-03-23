@@ -47,6 +47,16 @@ function evaluate(node, env::Dict)
     elseif node isa Expr # Expressions
         if node.head == :call  # Function calls
             call = node.args[1]
+
+            if haskey(env, string(call)) && env[string(call)].args[3] == "fexpr"
+                len = size(node.args, 1)
+                for i in 2:len
+                    if node.args[i] isa Expr
+                        node.args[i] = Expr(:quote, node.args[i])
+                    end
+                end
+            end
+
             args = map(x -> evaluate(x, env), node.args[2:end])
             if call isa Symbol
                 if call == :+
@@ -61,6 +71,9 @@ function evaluate(node, env::Dict)
                     return args[1] > args[2]
                 elseif call == :<
                     return args[1] < args[2]
+                elseif call == :(==)
+                    return args[1] == args[2]
+
                 elseif haskey(env, string(call))  # Defined functions
                     func = evaluate(call, env)
                     temp = newEnv(env)
@@ -117,14 +130,27 @@ function evaluate(node, env::Dict)
                 params = node.args[1].args[2:end]
                 body = node.args[2]
                 if length(params) == 1 # single function parameter
-                    lambda = Expr(:->, params[1], body)
+                    lambda = Expr(:->, params[1], body, "func")
                 else        # multiple or zero function parameters
-                    lambda = Expr(:->, Expr(:tuple, params...), body)
+                    lambda = Expr(:->, Expr(:tuple, params...), body, "func")
                 end
                 addBindingToEnv(env, name, lambda)
                 DEBUG_ENV && println("[DEBUG] environment: $(env)")
                 return Symbol("<function>")
             end
+
+        elseif node.head == :(:=)
+            name = string(node.args[1].args[1])
+            params = node.args[1].args[2:end]
+            body = node.args[2]
+            if length(params) == 1 # single function parameter
+                lambda = Expr(:->, params[1], body, "fexpr")
+            else        # multiple or zero function parameters
+                lambda = Expr(:->, Expr(:tuple, params...), body, "fexpr")
+            end
+            addBindingToEnv(env, name, lambda)
+            DEBUG_ENV && println("[DEBUG] environment: $(env)")
+            return Symbol("<fexpr>")
 
         elseif node.head == :quote
             value = Meta.parse(reflect(node.args[1], env))
@@ -184,6 +210,8 @@ function metajulia_repl()
         end
     end
 end
+
+metajulia_repl()
 
 end # module MetaJuliaREPL
 
