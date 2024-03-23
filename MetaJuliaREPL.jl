@@ -10,12 +10,12 @@ global_env = Dict{String,Any}("#" => nothing)
 # DEBUG
 # -------------------------------------------------
 
-DEBUG_ENV = false
+DEBUG_ENV = true
 DEBUG_NODE = true
 
 function print_node(node, prefix="")
     println("[DEBUG] $prefix type: $(typeof(node))")
-    if isa(node, Expr)
+    if node isa Expr
         println("[DEBUG] $prefix head: $(node.head)")
         println("[DEBUG] $prefix args: $(node.args)")
         for (i, arg) in enumerate(node.args)
@@ -33,47 +33,54 @@ end
 
 function evaluate(node, env::Dict)
 
-    if isa(node, Number) || isa(node, String) # Literals
+    if node isa Number || node isa String # Literals
         return node
 
-    elseif isa(node, QuoteNode) # Reflection
-        return node
-
-    elseif isa(node, Symbol) # Variables
+    elseif node isa Symbol # Variables
         name = string(node)
         result = getEnvBinding(env, name)
         return isnothing(result) ? error("Name not found: $name") : result
 
-    elseif isa(node, Expr) # Expressions
-        if node.head == :call  # Function calls
-            op = node.args[1]
-            args = map(x -> evaluate(x, env), node.args[2:end])
-            if op == :+
-                return sum(args)
-            elseif op == :-
-                return reduce(-, args)
-            elseif op == :*
-                return prod(args)
-            elseif op == :/
-                return reduce(/, args)
-            elseif op == :>
-                return args[1] > args[2]
-            elseif op == :<
-                return args[1] < args[2]
+    elseif node isa QuoteNode # Reflection
+        return node
 
-                # x(5)       [x, 5]
-            elseif haskey(env, string(op))  # Defined functions
-                # env = ("x" => ("args" => ["y"], "body" => quote y + 1 end))
-                func = env[string(op)]
-                # func = ("args" => ["y"], "body" => quote y + 1 end)
-                func_args = func["args"]
-                func_body = func["body"]
-                # execute the func_body with func_args substituted with args
-                inner = newEnv(env)
-                for (i, arg) in enumerate(func_args)
-                    addBindingToEnv(inner, arg, args[i]) #inner: ("y" => 5)
+    elseif node isa Expr # Expressions
+        if node.head == :call  # Function calls
+            call = node.args[1]
+            args = map(x -> evaluate(x, env), node.args[2:end])
+            if call isa Symbol
+                if call == :+
+                    return sum(args)
+                elseif call == :-
+                    return reduce(-, args)
+                elseif call == :*
+                    return prod(args)
+                elseif call == :/
+                    return reduce(/, args)
+                elseif call == :>
+                    return args[1] > args[2]
+                elseif call == :<
+                    return args[1] < args[2]
+                elseif haskey(env, string(call))  # Defined functions
+                    func = evaluate(call, env)
+                    temp = newEnv(env)
+                    # adapt to the number of function parameters (single or multiple or zero)
+                    params = func.args[1] isa Symbol ? [func.args[1]] : func.args[1].args
+                    for (param, arg) in zip(params, args)
+                        addBindingToEnv(temp, string(param), arg)
+                    end
+                    return evaluate(func.args[2], temp)
                 end
-                return evaluate(func_body, inner)
+            elseif call isa Expr
+                if call.head == :->     # Anonymous functions
+                    temp = newEnv(env)
+                    # adapt to the number of function parameters (single or multiple or zero)
+                    params = call.args[1] isa Symbol ? [call.args[1]] : call.args[1].args
+                    for (param, arg) in zip(params, args)
+                        addBindingToEnv(temp, string(param), arg)
+                    end
+                    return evaluate(call.args[2], temp)
+                end
 
             else
                 error("Unsupported operation: $op")
@@ -87,11 +94,11 @@ function evaluate(node, env::Dict)
             return evaluate(node.args[1], env) ? evaluate(node.args[2], env) : evaluate(node.args[3], env)
 
         elseif node.head == :block
-            val = nothing
+            value = nothing
             for arg in node.args
-                val = evaluate(arg, env)
+                value = evaluate(arg, env)
             end
-            return val
+            return value
 
         elseif node.head == :let
             inner = newEnv(env)
@@ -99,21 +106,22 @@ function evaluate(node, env::Dict)
             return evaluate(node.args[2], inner) # block phase
 
         elseif node.head == :(=)
-            if isa(node.args[1], Symbol)    # is a Variable
+            if node.args[1] isa Symbol    # is a Variable
                 name = string(node.args[1])
                 value = evaluate(node.args[2], env)
                 addBindingToEnv(env, name, value)
                 DEBUG_ENV && println("[DEBUG] environment: $(env)")
                 return value
-            elseif isa(node.args[1], Expr) && node.args[1].head == :call    # is a Function
+            elseif node.args[1] isa Expr && node.args[1].head == :call    # is a Function
                 name = string(node.args[1].args[1])
-                func = Dict{String,Any}()
-                func["args"] = []
-                for arg in node.args[1].args[2:end]
-                    push!(func["args"], string(arg))
+                params = node.args[1].args[2:end]
+                body = node.args[2]
+                if length(params) == 1 # single function parameter
+                    lambda = Expr(:->, params[1], body)
+                else        # multiple or zero function parameters
+                    lambda = Expr(:->, Expr(:tuple, params...), body)
                 end
-                func["body"] = node.args[2]
-                addBindingToEnv(env, name, func)
+                addBindingToEnv(env, name, lambda)
                 DEBUG_ENV && println("[DEBUG] environment: $(env)")
                 return "<function>"
             end
@@ -126,20 +134,17 @@ function evaluate(node, env::Dict)
             error("Unsupported expression type: $(node.head)")
         end
     else
-        #! MARTELADA - Não sabemos bem o que isto é
-        #TODO: Maybe precisamos de um if para garantir que é uma var
-        value = getEnvBinding(string(node), env)
-        return isnothing(value) ? error("Symbol is not defined") : value
+        error("Unsupported node type: $(typeof(node))")
     end
 end
 
 
 function reflect(node, env::Dict) # Used for reflection to avoid evaluation of calls
-    if isa(node, Symbol) || isa(node, Number) || isa(node, String)
+    if node isa Symbol || node isa Number || node isa String
         return string(node)
     elseif node.head == :($)
         return string(evaluate(node.args[1], env))
-    elseif isa(node, Expr)
+    elseif node isa Expr
         return "(" * reflect(node.args[2], env) * string(node.args[1]) * reflect(node.args[3], env) * ")"
     end
 end
@@ -168,10 +173,10 @@ function metajulia_repl()
 
         DEBUG_NODE && print_node(node, "node")
 
-        if isa(node, Expr) || isa(node, Number) || isa(node, String) || isa(node, Symbol) || isa(node, QuoteNode)
+        if node isa Expr || node isa Number || node isa String || node isa Symbol || node isa QuoteNode
             # Evaluate the AST and print the result
             result = evaluate(node, global_env)
-            isa(result, String) ? println("\"$(result)\"") : println(result)
+            result isa String ? println("\"$(result)\"") : println(result)
 
         else # Unsupported AST node types
             error("Unsupported AST node type: $(typeof(node))")
