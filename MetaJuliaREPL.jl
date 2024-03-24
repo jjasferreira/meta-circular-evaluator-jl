@@ -48,7 +48,7 @@ end
 # EVALUATE
 # -------------------------------------------------
 
-function evaluate(node, env::Dict)
+function evaluate(node, env::Dict=global_env)
     if node isa Number || node isa String # Literals
         return node
 
@@ -61,7 +61,6 @@ function evaluate(node, env::Dict)
         if node.value isa String || node.value isa Number
             return node.value
         end
-
         return node
 
     elseif node isa Expr # Expressions
@@ -89,6 +88,7 @@ function evaluate(node, env::Dict)
             else
                 args = map(x -> evaluate(x, env), node.args[2:end])
             end
+
             if call isa Symbol
                 if call == :+
                     return sum(args)
