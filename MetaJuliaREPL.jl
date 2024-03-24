@@ -40,6 +40,11 @@ function evaluate(node, env::Dict)
         return isnothing(result) ? error("Name not found: $name") : result
 
     elseif node isa QuoteNode # Reflection
+
+        if node.value isa String || node.value isa Number
+            return node.value
+        end
+
         return node
 
     elseif node isa Expr # Expressions
@@ -227,8 +232,6 @@ function metajulia_repl()
         end
     end
 end
-
-metajulia_repl()
 
 end # module MetaJuliaREPL
 
