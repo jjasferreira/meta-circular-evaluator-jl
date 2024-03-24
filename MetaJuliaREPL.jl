@@ -48,12 +48,14 @@ function evaluate(node, env::Dict)
         return node
 
     elseif node isa Expr # Expressions
+        DEBUG_NODE && println("[DEBUG] AST is: $(node)")
         DEBUG_NODE && println("[DEBUG] AST head type: $(node.head)") # rm line
         DEBUG_NODE && println("[DEBUG] AST args: $(node.args)") # rm line
         if node.head == :call  # Function calls
             call = node.args[1]
 
-            if haskey(env, string(call)) && env[string(call)].args[3] == "fexpr"
+            # needed to define fexpr args as quotes instead of calls
+            if !isnothing(getEnvBinding(env, string(call))) && evaluate(call, env).args[3] == "fexpr"
                 len = size(node.args, 1)
                 for i in 2:len
                     if node.args[i] isa Expr
@@ -83,10 +85,10 @@ function evaluate(node, env::Dict)
                 elseif call == :(==)
                     return args[1] == args[2]
                 elseif call == :(eval)
-                    if args[1].head == :call
-                        return evaluate(args[1], env)
-                    elseif args[1].head == :quote
+                    if args[1] isa Expr && args[1].head == :quote
                         return evaluate(args[1].args[1], env)
+                    else
+                        return evaluate(args[1], env)
                     end
                 elseif call == :(println)
                     final = string()
@@ -231,7 +233,17 @@ function reflect(node, env::Dict) # Used for reflection to avoid evaluation of c
     elseif node.head == :($)
         return string(evaluate(node.args[1], env))
     elseif node isa Expr
-        return "(" * reflect(node.args[2], env) * string(node.args[1]) * reflect(node.args[3], env) * ")"
+        len = size(node.args, 1)
+        final = string() * "("
+        for i in 2:len
+            final = final * reflect(node.args[i], env)
+            if i == len
+                break
+            end
+            final = final * string(node.args[1])
+        end
+        final = final * ")"
+        return final
     end
 end
 
@@ -270,6 +282,8 @@ function metajulia_repl()
         end
     end
 end
+
+metajulia_repl()
 
 end # module MetaJuliaREPL
 
