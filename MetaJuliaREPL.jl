@@ -100,16 +100,27 @@ function evaluate(node, env::Dict=global_env)
                     end
                 elseif call == :*
                     return prod(args)
+                elseif call == :^
+                    return reduce(^, args)
                 elseif call == :/
                     return reduce(/, args)
-                elseif call == :>
-                    return args[1] > args[2]
+                elseif call == :%
+                    return reduce(%, args)
                 elseif call == :<
                     return args[1] < args[2]
+                elseif call == :<=
+                    return args[1] <= args[2]
                 elseif call == :(==)
                     return args[1] == args[2]
+                elseif call == :>=
+                    return args[1] >= args[2]
+                elseif call == :>
+                    return args[1] > args[2]
+                elseif call == :(!=)
+                    return args[1] != args[2]
                 elseif call == :!
-                    return !evaluate(args[1], env)
+                    return !args[1]
+
                 elseif call == :(eval)
                     if args[1] isa Expr && args[1].head == :quote
                         return evaluate(args[1].args[1], env)
@@ -127,34 +138,35 @@ function evaluate(node, env::Dict=global_env)
                     end
                     println(final)
 
-                elseif !isnothing(getEnvBinding(env, string(call)))   # Defined functions
-                    func = evaluate(call, env) # gets the function
-                    if (isMacro) # its a macro
+                elseif hasEnvBinding(env, string(call)) # Defined functions
+                    """
+                    if (isMacro)
                         temp = env
                     else
                         temp = newEnv(env)
                     end
-                    # adapt to the number of function parameters (single or multiple or zero)
-                    params = func.args[1] isa Symbol ? [func.args[1]] : func.args[1].args
+                    """
+                    func = evaluate(call, env)
+                    params = func.args[1].args
+                    # use captured environment if function has one
+                    evalenv = length(func.args) >= 4 ? func.args[4] : newEnv(env)
                     for (param, arg) in zip(params, args)
-                        addEnvBinding(temp, string(param), arg)
+                        addEnvBinding(evalenv, string(param), arg)
                     end
-
-                    DEBUG_ENV && debug_env(temp)
-
+                    DEBUG_ENV && debug_env(evalenv)
+                    return evaluate(func.args[2], evalenv)
+                    """
                     returnEval = evaluate(func.args[2], temp)
                     isMacro = false
                     return returnEval
+                    """
                 else
-                    println(string(call))
-                    println(env)
-                    error("🤔")
+                    error("Unsupported symbol call: $call")
                 end
 
             elseif call isa Expr
                 if call.head == :->     # Anonymous functions
                     temp = newEnv(env)
-                    # adapt to the number of function parameters (single or multiple or zero)
                     params = call.args[1] isa Symbol ? [call.args[1]] : call.args[1].args
                     for (param, arg) in zip(params, args)
                         addEnvBinding(temp, string(param), arg)
@@ -164,25 +176,30 @@ function evaluate(node, env::Dict=global_env)
                 elseif call.head == :macro
                     error("🤔 macro")
                 else
-                    error("🤔 not macro")
+                    error("Unsupported expression call: $call")
                 end
             else
-                error("Unsupported operation: $op")
+                error("Unsupported call: $call")
             end
 
         elseif node.head == :||
+            return evaluate(node.args[1], env) || evaluate(node.args[2], env)
+            """ TODO if not working, try this:
             if evaluate(node.args[1], env)
                 return evaluate(node.args[1], env)
             else
                 evaluate(node.args[2], env)
             end
-
+            """
         elseif node.head == :&&
+            return evaluate(node.args[1], env) && evaluate(node.args[2], env)
+            """ TODO if not working, try this:
             if evaluate(node.args[1], env)
                 return evaluate(node.args[2], env)
             else
                 return evaluate(node.args[1], env)
             end
+            """
 
         elseif node.head == :if
             return evaluate(node.args[1], env) ? evaluate(node.args[2], env) : evaluate(node.args[3], env)
@@ -199,36 +216,99 @@ function evaluate(node, env::Dict=global_env)
             evaluate(node.args[1], inner) # assignment phase
             return evaluate(node.args[2], inner) # block phase
 
+        elseif node.head == :global
+            glob = node.args[1]
+            if glob.args[1] isa Expr && glob.args[1].head == :call
+                # Global function assignment (global f(x) = x+1)
+                name = string(glob.args[1].args[1])
+                params = glob.args[1].args[2:end]
+                block = glob.args[2]
+                # creates function (w/ captured env) on global env
+                lambda = Expr(:->, Expr(:tuple, params...), block, "func", env)
+                addEnvBinding(global_env, name, lambda)
+                DEBUG_ENV && debug_env(global_env)
+                return Symbol("<function>")
+            elseif glob.args[2] isa Expr && glob.args[2].head == :->
+                # Global anonymous function assignment (global f = x -> x+1)
+                name = string(glob.args[1])
+                params = glob.args[2].args[1] isa Symbol ? [glob.args[2].args[1]] : glob.args[2].args[1].args
+                block = glob.args[2].args[2]
+                # creates function (w/ captured env) on global env
+                lambda = Expr(:->, Expr(:tuple, params...), block, "func", env)
+                addEnvBinding(global_env, name, lambda)
+                DEBUG_ENV && debug_env(global_env)
+                return Symbol("<function>")
+            elseif glob.args[1] isa Symbol
+                # Global variable assignment (global x = 1)
+                name = string(glob.args[1])
+                value = evaluate(glob.args[2], env)
+                addEnvBinding(global_env, name, value)
+                DEBUG_ENV && debug_env(global_env)
+                return value
+            else
+                error("Unsupported global assignment: $(glob.args[1]) = $(glob.args[2])")
+            end
+
+        elseif node.head == :-> # Anonymous functions passed as arguments
+            params = node.args[1] isa Symbol ? [node.args[1]] : node.args[1].args
+            block = node.args[2]
+            lambda = Expr(:->, Expr(:tuple, params...), block, "func")
+            return lambda
+
         elseif node.head == :(=)
-            if node.args[1] isa Symbol    # is a Variable
+            if node.args[1] isa Expr && node.args[1].head == :call
+                # Function assignment (f(x) = ...)
+                name = string(node.args[1].args[1])
+                params = node.args[1].args[2:end]
+                block = node.args[2]
+                if block.args[1] isa Expr && block.args[1].head == :let
+                    # with captured environment (f(x) = let y = 1; x+y end)
+                    capt = newEnv(env)
+                    evaluate(block.args[1].args[1], capt) # assignments only
+                    lambda = Expr(:->, Expr(:tuple, params...), block.args[1].args[2], "func", capt)
+                else
+                    # without captured environment (f(x) = x+1)
+                    lambda = Expr(:->, Expr(:tuple, params...), block, "func")
+                end
+                addEnvBinding(env, name, lambda)
+                DEBUG_ENV && debug_env(env)
+                return Symbol("<function>")
+            elseif node.args[2] isa Expr && node.args[2].head == :let && node.args[2].args[2].args[1].head == :->
+                # Anonymous function assignment with captured environment (f = let y = 1; x -> y=x+y end)
+                name = string(node.args[1])
+                params = node.args[2].args[2].args[1].args[1] isa Symbol ? [node.args[2].args[2].args[1].args[1]] : node.args[2].args[2].args[1].args
+                block = node.args[2].args[2].args[1].args[2]
+                capt = newEnv(env)
+                evaluate(node.args[2].args[1], capt) # assignments only
+                lambda = Expr(:->, Expr(:tuple, params...), block, "func", capt)
+                addEnvBinding(env, name, lambda)
+                DEBUG_ENV && debug_env(env)
+                return Symbol("<function>")
+            elseif node.args[2] isa Expr && node.args[2].head == :->
+                # Anonymous function assignment without captured environment (f = x -> x+1)
+                name = string(node.args[1])
+                params = node.args[2].args[1] isa Symbol ? [node.args[2].args[1]] : node.args[2].args[1].args
+                block = node.args[2].args[2]
+                lambda = Expr(:->, Expr(:tuple, params...), block, "func")
+                addEnvBinding(env, name, lambda)
+                DEBUG_ENV && debug_env(env)
+                return Symbol("<function>")
+            elseif node.args[1] isa Symbol
+                # Variable assignment (x = 1)
                 name = string(node.args[1])
                 value = evaluate(node.args[2], env)
                 addEnvBinding(env, name, value)
                 DEBUG_ENV && debug_env(env)
                 return value
-            elseif node.args[1] isa Expr && node.args[1].head == :call    # is a Function
-                name = string(node.args[1].args[1])
-                params = node.args[1].args[2:end]
-                body = node.args[2]
-                if length(params) == 1 # single function parameter
-                    lambda = Expr(:->, params[1], body, "func")
-                else        # multiple or zero function parameters
-                    lambda = Expr(:->, Expr(:tuple, params...), body, "func")
-                end
-                addEnvBinding(env, name, lambda)
-                DEBUG_ENV && debug_env(env)
-                return Symbol("<function>")
+            else
+                error("Unsupported assignment: $(node.args[1]) = $(node.args[2])")
             end
 
         elseif node.head == :(:=)
             name = string(node.args[1].args[1])
             params = node.args[1].args[2:end]
-            body = node.args[2]
-            if length(params) == 1 # single function parameter
-                lambda = Expr(:->, params[1], body, "fexpr")
-            else        # multiple or zero function parameters
-                lambda = Expr(:->, Expr(:tuple, params...), body, "fexpr")
-            end
+            block = node.args[2]
+            lambda = Expr(:->, Expr(:tuple, params...), block, "fexpr")
             addEnvBinding(env, name, lambda)
             DEBUG_ENV && debug_env(env)
             return Symbol("<fexpr>")
@@ -257,7 +337,7 @@ function evaluate(node, env::Dict=global_env)
             return Symbol("<macro>")
 
         else
-            error("Unsupported expression type: $(node.head)")
+            error("Unsupported expression head: $(node.head)")
         end
     elseif isnothing(node)
         return
@@ -314,7 +394,7 @@ function metajulia_repl()
 
         if node isa Expr || node isa Number || node isa String || node isa Symbol || node isa QuoteNode
             # Evaluate the node and print the result
-            result = evaluate(node, global_env)
+            result = evaluate(node)
             result isa String ? println("\"$(result)\"") : println(result)
 
         else
