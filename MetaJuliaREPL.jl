@@ -30,7 +30,7 @@ end
 # -------------------------------------------------
 
 function evaluate(node, env::Dict)
-
+    
     if node isa Number || node isa String # Literals
         return node
 
@@ -48,6 +48,8 @@ function evaluate(node, env::Dict)
         return node
 
     elseif node isa Expr # Expressions
+        DEBUG_NODE && println("[DEBUG] AST head type: $(node.head)") # rm line
+        DEBUG_NODE && println("[DEBUG] AST args: $(node.args)") # rm line
         if node.head == :call  # Function calls
             call = node.args[1]
 
@@ -65,7 +67,11 @@ function evaluate(node, env::Dict)
                 if call == :+
                     return sum(args)
                 elseif call == :-
-                    return reduce(-, args)
+                    if length(args) == 1
+                        return reduce(-, [0, args[1]])
+                    else
+                        return reduce(-, args)
+                    end
                 elseif call == :*
                     return prod(args)
                 elseif call == :/
@@ -92,17 +98,28 @@ function evaluate(node, env::Dict)
                         end
                     end
                     println(final)
-
-                elseif hasEnvBinding(env, string(call)) # Defined functions
-                    func = evaluate(call, env)
-                    temp = newEnv(env)
+                    
+                elseif !isnothing(getEnvBinding(env, string(call)))   # Defined functions
+                    func = evaluate(call, env) # gets the function
+                    macroPattern = r"^macro\s*\(" #TODO: fazer doutra forma
+                    if(occursin(macroPattern, string(func))) # its a macro
+                        temp = env
+                    else
+                        temp = newEnv(env) 
+                    end
                     # adapt to the number of function parameters (single or multiple or zero)
                     params = func.args[1] isa Symbol ? [func.args[1]] : func.args[1].args
                     for (param, arg) in zip(params, args)
                         addEnvBinding(temp, string(param), arg)
                     end
+                    
                     DEBUG_ENV && println("[DEBUG] temp: $(temp)")
+
                     return evaluate(func.args[2], temp)
+                else
+                    println(string(call))
+                    println(env)
+                    error("🤔")
                 end
 
             elseif call isa Expr
@@ -120,6 +137,7 @@ function evaluate(node, env::Dict)
             else
                 error("Unsupported operation: $op")
             end
+
         elseif node.head == :||
             return evaluate(node.args[1], env) || evaluate(node.args[2], env)
         elseif node.head == :&&
@@ -177,6 +195,26 @@ function evaluate(node, env::Dict)
         elseif node.head == :quote
             value = Meta.parse(reflect(node.args[1], env))
             return Expr(:quote, value)
+
+        elseif node.head == :$=          # Macro definition
+            # node.args[1] = antes do $=
+            # node.args[2] = depois do $=
+            name = string(node.args[1].args[1])
+            params = node.args[1].args[2:end]
+            body = node.args[2]
+
+            if length(params) == 1              # single macro parameter
+                lambda = Expr(:macro, params[1], body, "macro")
+            else                                # multiple or zero macro parameters
+                lambda = Expr(:macro, Expr(:tuple, params...), body, "macro")
+            end
+
+            println(lambda)
+
+            addEnvBinding(env, name, lambda)
+            DEBUG_ENV && println("[DEBUG] environment: $(env)")
+            
+            return Symbol("<macro>")
 
         else
             error("Unsupported expression type: $(node.head)")
