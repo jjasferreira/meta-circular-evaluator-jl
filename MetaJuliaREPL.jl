@@ -30,7 +30,6 @@ end
 # -------------------------------------------------
 
 function evaluate(node, env::Dict)
-    
     if node isa Number || node isa String # Literals
         return node
 
@@ -40,7 +39,6 @@ function evaluate(node, env::Dict)
         return isnothing(result) ? error("Name not found: $name") : result
 
     elseif node isa QuoteNode # Reflection
-
         if node.value isa String || node.value isa Number
             return node.value
         end
@@ -48,6 +46,7 @@ function evaluate(node, env::Dict)
         return node
 
     elseif node isa Expr # Expressions
+        isMacro = false
         DEBUG_NODE && println("[DEBUG] AST is: $(node)")
         DEBUG_NODE && println("[DEBUG] AST head type: $(node.head)") # rm line
         DEBUG_NODE && println("[DEBUG] AST args: $(node.args)") # rm line
@@ -64,7 +63,13 @@ function evaluate(node, env::Dict)
                 end
             end
 
-            args = map(x -> evaluate(x, env), node.args[2:end])
+            if occursin(r"macro\"\)\)$", string(getEnvBinding(env, string(node.args[1]))))
+                # we will need to evaluate this later
+                args = map(x -> x, node.args[2:end])
+                isMacro = true
+            else
+                args = map(x -> evaluate(x, env), node.args[2:end])
+            end
             if call isa Symbol
                 if call == :+
                     return sum(args)
@@ -105,8 +110,7 @@ function evaluate(node, env::Dict)
                     
                 elseif !isnothing(getEnvBinding(env, string(call)))   # Defined functions
                     func = evaluate(call, env) # gets the function
-                    macroPattern = r"^macro\s*\(" #TODO: fazer doutra forma
-                    if(occursin(macroPattern, string(func))) # its a macro
+                    if(isMacro) # its a macro
                         temp = env
                     else
                         temp = newEnv(env) 
@@ -119,7 +123,9 @@ function evaluate(node, env::Dict)
                     
                     DEBUG_ENV && println("[DEBUG] temp: $(temp)")
 
-                    return evaluate(func.args[2], temp)
+                    returnEval = evaluate(func.args[2], temp)
+                    isMacro = false
+                    return returnEval
                 else
                     println(string(call))
                     println(env)
@@ -136,8 +142,11 @@ function evaluate(node, env::Dict)
                     end
                     DEBUG_ENV && println("[DEBUG] temp: $(temp)")
                     return evaluate(call.args[2], temp)
+                elseif call.head == :macro
+                    error("🤔 macro")
+                else
+                    error("🤔 not macro")
                 end
-
             else
                 error("Unsupported operation: $op")
             end
@@ -207,8 +216,13 @@ function evaluate(node, env::Dict)
 
         elseif node.head == :quote
             value = Meta.parse(reflect(node.args[1], env))
+            Base.remove_linenums!(value)
             return Expr(:quote, value)
-
+        
+        elseif node.head == :$
+            val = getEnvBinding(env, string(node.args[1]))
+            return evaluate(val,env)
+        
         elseif node.head == :$=          # Macro definition
             # node.args[1] = antes do $=
             # node.args[2] = depois do $=
@@ -216,13 +230,7 @@ function evaluate(node, env::Dict)
             params = node.args[1].args[2:end]
             body = node.args[2]
 
-            if length(params) == 1              # single macro parameter
-                lambda = Expr(:macro, params[1], body, "macro")
-            else                                # multiple or zero macro parameters
-                lambda = Expr(:macro, Expr(:tuple, params...), body, "macro")
-            end
-
-            println(lambda)
+            lambda = Expr(:macro, Expr(:tuple, params...), body.args..., "macro")
 
             addEnvBinding(env, name, lambda)
             DEBUG_ENV && println("[DEBUG] environment: $(env)")
@@ -232,6 +240,8 @@ function evaluate(node, env::Dict)
         else
             error("Unsupported expression type: $(node.head)")
         end
+    elseif isnothing(node)
+        return;
     else
         error("Unsupported node type: $(typeof(node))")
     end
