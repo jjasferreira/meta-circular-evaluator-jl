@@ -12,16 +12,35 @@ global_env = Dict{String,Any}("#" => nothing)
 DEBUG_ENV = false
 DEBUG_NODE = false
 
-function print_node(node, prefix="")
-    println("[DEBUG] $prefix type: $(typeof(node))")
+function debug_env(env::Dict{String,Any}, prefix="")
+    for (key, value) in env
+        if value isa Expr && value.head == :->
+            params = "(" * join([string(p) for p in value.args[1].args], ", ") * ")"
+            block = replace(repr(value.args[2]), "\n" => " ")
+            block = replace(block, r"\s+" => " ")
+            println("$prefix[ENV] $key => $params->($block)")
+        elseif value isa Dict
+            println("$prefix[ENV] $key => "), debug_env(value, prefix * "      ")
+        else
+            println("$prefix[ENV] $key => $value")
+        end
+    end
+end
+
+function debug_node(node, prefix="", is_last=true)
+    lines = is_last ? "└── " : "├── "
+    print("[NODE]$prefix$lines$(typeof(node))")
     if node isa Expr
-        println("[DEBUG] $prefix head: $(node.head)")
-        println("[DEBUG] $prefix args: $(node.args)")
+        print("($(node.head)): ")
+        args = "[" * join([string(arg) for arg in node.args], ", ") * "]"
+        args = replace(args, "\n" => " ")
+        println(replace(args, r"\s+" => " "))
+        prefix *= (is_last ? "    " : "│   ")
         for (i, arg) in enumerate(node.args)
-            print_node(arg, "$prefix arg$i ")
+            debug_node(arg, prefix, i == length(node.args))
         end
     else
-        println("[DEBUG] $prefix value: $node")
+        println(": $node")
     end
 end
 
@@ -47,9 +66,9 @@ function evaluate(node, env::Dict)
 
     elseif node isa Expr # Expressions
         isMacro = false
-        DEBUG_NODE && println("[DEBUG] AST is: $(node)")
-        DEBUG_NODE && println("[DEBUG] AST head type: $(node.head)") # rm line
-        DEBUG_NODE && println("[DEBUG] AST args: $(node.args)") # rm line
+        DEBUG_NODE && println("[DEBUG] AST is: $(node)") #rm
+        DEBUG_NODE && println("[DEBUG] AST head type: $(node.head)") #rm
+        DEBUG_NODE && println("[DEBUG] AST args: $(node.args)") #rm
         if node.head == :call  # Function calls
             call = node.args[1]
 
@@ -102,26 +121,26 @@ function evaluate(node, env::Dict)
                     for arg in args
                         if arg isa Expr && arg.head == :quote
                             final = final * string(arg.args[1])
-                        else 
+                        else
                             final = final * string(arg)
                         end
                     end
                     println(final)
-                    
+
                 elseif !isnothing(getEnvBinding(env, string(call)))   # Defined functions
                     func = evaluate(call, env) # gets the function
-                    if(isMacro) # its a macro
+                    if (isMacro) # its a macro
                         temp = env
                     else
-                        temp = newEnv(env) 
+                        temp = newEnv(env)
                     end
                     # adapt to the number of function parameters (single or multiple or zero)
                     params = func.args[1] isa Symbol ? [func.args[1]] : func.args[1].args
                     for (param, arg) in zip(params, args)
                         addEnvBinding(temp, string(param), arg)
                     end
-                    
-                    DEBUG_ENV && println("[DEBUG] temp: $(temp)")
+
+                    DEBUG_ENV && debug_env(temp)
 
                     returnEval = evaluate(func.args[2], temp)
                     isMacro = false
@@ -140,7 +159,7 @@ function evaluate(node, env::Dict)
                     for (param, arg) in zip(params, args)
                         addEnvBinding(temp, string(param), arg)
                     end
-                    DEBUG_ENV && println("[DEBUG] temp: $(temp)")
+                    DEBUG_ENV && debug_env(temp)
                     return evaluate(call.args[2], temp)
                 elseif call.head == :macro
                     error("🤔 macro")
@@ -154,14 +173,14 @@ function evaluate(node, env::Dict)
         elseif node.head == :||
             if evaluate(node.args[1], env)
                 return evaluate(node.args[1], env)
-            else 
+            else
                 evaluate(node.args[2], env)
             end
 
         elseif node.head == :&&
             if evaluate(node.args[1], env)
                 return evaluate(node.args[2], env)
-            else 
+            else
                 return evaluate(node.args[1], env)
             end
 
@@ -185,7 +204,7 @@ function evaluate(node, env::Dict)
                 name = string(node.args[1])
                 value = evaluate(node.args[2], env)
                 addEnvBinding(env, name, value)
-                DEBUG_ENV && println("[DEBUG] env: $(env)")
+                DEBUG_ENV && debug_env(env)
                 return value
             elseif node.args[1] isa Expr && node.args[1].head == :call    # is a Function
                 name = string(node.args[1].args[1])
@@ -197,7 +216,7 @@ function evaluate(node, env::Dict)
                     lambda = Expr(:->, Expr(:tuple, params...), body, "func")
                 end
                 addEnvBinding(env, name, lambda)
-                DEBUG_ENV && println("[DEBUG] env: $(env)")
+                DEBUG_ENV && debug_env(env)
                 return Symbol("<function>")
             end
 
@@ -211,18 +230,18 @@ function evaluate(node, env::Dict)
                 lambda = Expr(:->, Expr(:tuple, params...), body, "fexpr")
             end
             addEnvBinding(env, name, lambda)
-            DEBUG_ENV && println("[DEBUG] env: $(env)")
+            DEBUG_ENV && debug_env(env)
             return Symbol("<fexpr>")
 
         elseif node.head == :quote
             value = Meta.parse(reflect(node.args[1], env))
             Base.remove_linenums!(value)
             return Expr(:quote, value)
-        
+
         elseif node.head == :$
             val = getEnvBinding(env, string(node.args[1]))
-            return evaluate(val,env)
-        
+            return evaluate(val, env)
+
         elseif node.head == :$=          # Macro definition
             # node.args[1] = antes do $=
             # node.args[2] = depois do $=
@@ -233,15 +252,15 @@ function evaluate(node, env::Dict)
             lambda = Expr(:macro, Expr(:tuple, params...), body.args..., "macro")
 
             addEnvBinding(env, name, lambda)
-            DEBUG_ENV && println("[DEBUG] environment: $(env)")
-            
+            DEBUG_ENV && debug_env(temp)
+
             return Symbol("<macro>")
 
         else
             error("Unsupported expression type: $(node.head)")
         end
     elseif isnothing(node)
-        return;
+        return
     else
         error("Unsupported node type: $(typeof(node))")
     end
@@ -291,7 +310,7 @@ end
 function metajulia_repl()
     while true
         node = parse_input()
-        DEBUG_NODE && print_node(node, "node")
+        DEBUG_NODE && debug_node(node)
 
         if node isa Expr || node isa Number || node isa String || node isa Symbol || node isa QuoteNode
             # Evaluate the node and print the result
