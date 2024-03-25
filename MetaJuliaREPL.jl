@@ -447,8 +447,6 @@ function metajulia_repl()
     end
 end
 
-metajulia_repl()
-
 end # module MetaJuliaREPL
 
 metajulia_repl() = Main.MetaJuliaREPL.metajulia_repl()
