@@ -149,6 +149,16 @@ function evaluate(node, env::Dict=global_env)
                     func = evaluate(call, env)
                     params = func.args[1].args
                     # use captured environment if function has one
+
+                    if(isMacro)
+                        for (param, arg) in zip(params, args)
+                            addEnvBinding(env, string(param), arg)
+                        end
+                        val = evaluate(func.args[2], env)
+                        isMacro = false
+                        return val
+                    end
+
                     evalenv = length(func.args) >= 4 ? func.args[4] : newEnv(env)
                     for (param, arg) in zip(params, args)
                         addEnvBinding(evalenv, string(param), arg)
