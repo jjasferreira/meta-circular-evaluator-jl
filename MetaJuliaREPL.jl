@@ -80,7 +80,9 @@ function evaluate(node, env::Dict=global_env)
                 len = size(node.args, 1)
                 for i in 2:len
                     if node.args[i] isa Expr && node.args[i].head != :quote
+                        println("fexpr arg before ", node.args[i])
                         node.args[i] = Expr(:quote, node.args[i])
+                        println("fexpr arg after ", node.args[i])
                     end
                 end
             end
@@ -238,10 +240,17 @@ function evaluate(node, env::Dict=global_env)
                 params = glob.args[1].args[2:end]
                 block = glob.args[2]
                 # creates function (w/ captured env) on global env
-                lambda = Expr(:->, Expr(:tuple, params...), block, "func", env)
-                addEnvBinding(global_env, name, lambda)
-                DEBUG_ENV && debug_env(global_env)
-                return Symbol("<function>")
+                if glob.head == :(:=) # for fexprs
+                    lambda = Expr(:->, Expr(:tuple, params...), block, "fexpr", env)
+                    addEnvBinding(global_env, name, lambda)
+                    DEBUG_ENV && debug_env(global_env)
+                    return Symbol("<fexpr>")
+                else # for functions
+                    lambda = Expr(:->, Expr(:tuple, params...), block, "func", env)
+                    addEnvBinding(global_env, name, lambda)
+                    DEBUG_ENV && debug_env(global_env)
+                    return Symbol("<function>")
+                end
             elseif glob.args[2] isa Expr && glob.args[2].head == :->
                 # Global anonymous function assignment (global f = x -> x+1)
                 name = string(glob.args[1])
