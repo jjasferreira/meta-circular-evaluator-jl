@@ -9,8 +9,8 @@ global_env = Dict{String,Any}("#" => nothing)
 # DEBUG
 # -------------------------------------------------
 
-DEBUG_ENV = false
-DEBUG_NODE = false
+DEBUG_ENV = true
+DEBUG_NODE = true
 
 function debug_env(env::Dict{String,Any}, prefix="")
     for (key, value) in env
@@ -49,7 +49,11 @@ end
 # -------------------------------------------------
 
 function evaluate(node, env::Dict=global_env)
-    if node isa Number || node isa String # Literals
+
+    if isnothing(node) # null value
+        return
+
+    elseif node isa Number || node isa String # Literals
         return node
 
     elseif node isa Symbol # Variables
@@ -75,7 +79,7 @@ function evaluate(node, env::Dict=global_env)
             if !isnothing(getEnvBinding(env, string(call))) && evaluate(call, env).args[3] == "fexpr"
                 len = size(node.args, 1)
                 for i in 2:len
-                    if node.args[i] isa Expr
+                    if node.args[i] isa Expr && node.args[i].head != :quote
                         node.args[i] = Expr(:quote, node.args[i])
                     end
                 end
@@ -358,21 +362,44 @@ end
 
 
 function reflect(node, env::Dict) # Used for reflection to avoid evaluation of calls
-    if node isa Symbol || node isa Number || node isa String
+    println("node to be reflected is ", node)
+    if node isa Symbol || node isa Number
         return string(node)
+    elseif node isa String
+        return "\"$(string(node))\""
     elseif node.head == :($)
         return string(evaluate(node.args[1], env))
-    elseif node isa Expr
-        len = size(node.args, 1)
+    elseif node isa Expr && node.head == :block
         final = string() * "("
-        for i in 2:len
+        len = size(node.args, 1)
+        for i in 1:len
             final = final * reflect(node.args[i], env)
             if i == len
                 break
             end
-            final = final * string(node.args[1])
+            final = final * ";"
         end
         final = final * ")"
+        return final
+    elseif node isa Expr && node.head == :(=)
+        return string("(", reflect(node.args[1], env), " = ",  reflect(node.args[2], env), ")")
+        
+    else
+        len = size(node.args, 1)
+        final = string() * "("
+        if len == 2
+            final = final * string(node.args[1]) * "(" * reflect(node.args[2], env) * ")"
+        else
+            for i in 2:len
+                final = final * reflect(node.args[i], env)
+                if i == len
+                    break
+                end
+                final = final * string(node.args[1])
+            end
+        end
+        final = final * ")"
+        println("final string after reflection is ", final)
         return final
     end
 end
@@ -403,8 +430,15 @@ function metajulia_repl()
         DEBUG_NODE && debug_node(node)
 
         if node isa Expr || node isa Number || node isa String || node isa Symbol || node isa QuoteNode
+
             # Evaluate the node and print the result
             result = evaluate(node)
+
+            # no printing for null values
+            if isnothing(result)
+                continue
+            end
+
             result isa String ? println("\"$(result)\"") : println(result)
 
         else
@@ -412,6 +446,8 @@ function metajulia_repl()
         end
     end
 end
+
+metajulia_repl()
 
 end # module MetaJuliaREPL
 
