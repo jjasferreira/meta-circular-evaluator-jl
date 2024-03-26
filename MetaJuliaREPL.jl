@@ -9,8 +9,8 @@ global_env = Dict{String,Any}("#" => nothing)
 # DEBUG
 # -------------------------------------------------
 
-DEBUG_ENV = true
-DEBUG_NODE = true
+DEBUG_ENV = false
+DEBUG_NODE = false
 
 function debug_env(env::Dict{String,Any}, prefix="")
     for (key, value) in env
@@ -75,17 +75,28 @@ function evaluate(node, env::Dict=global_env)
         if node.head == :call  # Function calls
             call = node.args[1]
 
-            # needed to define fexpr args as quotes instead of calls
-            if !isnothing(getEnvBinding(env, string(call))) && evaluate(call, env).args[3] == "fexpr"
+            # needed to define fexpr args as quotes
+            tempFexpr = nothing
+            isFexpr = false
+            if !isnothing(getEnvBinding(env, string(call))) && evaluate(call, env) isa Expr && evaluate(call, env).args[3] == "fexpr"
+                isFexpr = true
+                fexpr = evaluate(call, env)
+                tempEnv = copy(env) # so we can have eval with the same scope as the function is called
+
                 len = size(node.args, 1)
                 for i in 2:len
                     if node.args[i] isa Expr && node.args[i].head != :quote
-                        println("fexpr arg before ", node.args[i])
                         node.args[i] = Expr(:quote, node.args[i])
-                        println("fexpr arg after ", node.args[i])
                     end
+                    addEnvBinding(tempEnv, string(fexpr.args[1].args[i-1]), node.args[i])
                 end
+
+                tempFexpr = copy(fexpr)
+
+                checkforeval(tempFexpr.args[2], tempEnv) # resolve evals right away
             end
+
+
 
             if occursin(r"macro\"\)\)$", string(getEnvBinding(env, string(node.args[1]))))
                 # we will need to evaluate this later
@@ -126,7 +137,6 @@ function evaluate(node, env::Dict=global_env)
                     return args[1] != args[2]
                 elseif call == :!
                     return !args[1]
-
                 elseif call == :(eval)
                     if args[1] isa Expr && args[1].head == :quote
                         return evaluate(args[1].args[1], env)
@@ -163,6 +173,16 @@ function evaluate(node, env::Dict=global_env)
                         val = evaluate(func.args[2], env)
                         isMacro = false
                         return val
+                    end
+
+                    if(isFexpr && !isnothing(tempFexpr))
+                        fexprParams = tempFexpr.args[1].args
+                        evalenv = length(tempFexpr.args) >= 4 ? tempFexpr.args[4] : newEnv(env)
+                        for (param, arg) in zip(fexprParams, args)
+                            addEnvBinding(evalenv, string(param), arg)
+                        end
+                        DEBUG_ENV && debug_env(evalenv)
+                        return evaluate(tempFexpr.args[2], evalenv)
                     end
 
                     evalenv = length(func.args) >= 4 ? func.args[4] : newEnv(env)
@@ -371,7 +391,6 @@ end
 
 
 function reflect(node, env::Dict) # Used for reflection to avoid evaluation of calls
-    println("node to be reflected is ", node)
     if node isa Symbol || node isa Number
         return string(node)
     elseif node isa String
@@ -408,8 +427,30 @@ function reflect(node, env::Dict) # Used for reflection to avoid evaluation of c
             end
         end
         final = final * ")"
-        println("final string after reflection is ", final)
         return final
+    end
+end
+
+function checkforeval(node, env::Dict)
+    if !(node isa Expr)
+        return
+    end
+    len = size(node.args, 1)
+    for i in 1:len
+        if node.args[i] isa Expr && node.args[i].head == :call && node.args[i].args[1] == :(eval)
+
+            #can't evaluate immediately for println
+            binding = getEnvBinding(env, string(node.args[i].args[2]))
+            if binding isa Expr && binding.args[1].args[1] == :(println)
+                return
+            end
+            
+            node.args[i] = evaluate(node.args[i], env)
+        elseif node.args[i] isa Expr && node.args[i].args[1] != :(eval)
+            checkforeval(node.args[i], env)
+        else
+            continue
+        end
     end
 end
 
