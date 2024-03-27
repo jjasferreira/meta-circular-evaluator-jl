@@ -82,6 +82,7 @@ function evaluate(node, env::Dict=global_env, singleScope::Dict=Dict{String,Any}
             isFexpr = false
             if !isMacro
                 if !isnothing(getEnvBinding(env, string(call))) && evaluate(call, env, singleScope).args[3] == "fexpr"
+                    isFexpr = true
                     len = size(node.args, 1)
                     for i in 2:len
                         if node.args[i] isa Expr && node.args[i].head != :quote
