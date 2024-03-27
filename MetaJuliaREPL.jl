@@ -636,15 +636,20 @@ function metajulia_eval(input)
         # no printing for null values
         if result isa String
             return ("\"$(result)\"")
+        end
 
-        elseif isnothing(result)
+        if isnothing(result)
             result = ""
         end
         
         if result isa QuoteNode
             return result.value
         end
-
+        
+        if result isa Expr && result.head == :quote
+            return result.args[1]
+        end
+        
         return result
         #result isa String ? println("\"$(result)\"") : println(result)
 
