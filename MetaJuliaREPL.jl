@@ -48,7 +48,7 @@ end
 # EVALUATE
 # -------------------------------------------------
 
-function evaluate(node, env::Dict=global_env)
+function evaluate(node, env::Dict=global_env, singleScope::Dict=Dict{String,Any}("#" => nothing))
 
     if isnothing(node) # null value
         return
@@ -75,35 +75,28 @@ function evaluate(node, env::Dict=global_env)
         if node.head == :call  # Function calls
             call = node.args[1]
 
-            # needed to define fexpr args as quotes
-            tempFexpr = nothing
-            isFexpr = false
-            if !isnothing(getEnvBinding(env, string(call))) && evaluate(call, env) isa Expr && evaluate(call, env).args[3] == "fexpr"
-                isFexpr = true
-                fexpr = evaluate(call, env)
-                tempEnv = copy(env) # so we can have eval with the same scope as the function is called
+            tempEnv = copy(env)
 
+            # needed to define fexpr args as quotes instead of calls
+            isFexpr = false
+            if !isnothing(getEnvBinding(env, string(call))) && evaluate(call, env, singleScope).args[3] == "fexpr"
+                isFexpr = true
                 len = size(node.args, 1)
                 for i in 2:len
                     if node.args[i] isa Expr && node.args[i].head != :quote
+                        println("fexpr arg before ", node.args[i])
                         node.args[i] = Expr(:quote, node.args[i])
+                        println("fexpr arg after ", node.args[i])
                     end
-                    addEnvBinding(tempEnv, string(fexpr.args[1].args[i-1]), node.args[i])
                 end
-
-                tempFexpr = copy(fexpr)
-
-                checkforeval(tempFexpr.args[2], tempEnv) # resolve evals right away
             end
-
-
 
             if occursin(r"macro\"\)\)$", string(getEnvBinding(env, string(node.args[1]))))
                 # we will need to evaluate this later
                 args = map(x -> x, node.args[2:end])
                 isMacro = true
             else
-                args = map(x -> evaluate(x, env), node.args[2:end])
+                args = map(x -> evaluate(x, env, singleScope), node.args[2:end])
             end
 
             if call isa Symbol
@@ -137,11 +130,12 @@ function evaluate(node, env::Dict=global_env)
                     return args[1] != args[2]
                 elseif call == :!
                     return !args[1]
+
                 elseif call == :(eval)
                     if args[1] isa Expr && args[1].head == :quote
-                        return evaluate(args[1].args[1], env)
+                        return evaluate(args[1].args[1], singleScope)
                     else
-                        return evaluate(args[1], env)
+                        return evaluate(args[1], singleScope)
                     end
                 elseif call == :(println)
                     final = string()
@@ -162,7 +156,7 @@ function evaluate(node, env::Dict=global_env)
                         temp = newEnv(env)
                     end
                     """
-                    func = evaluate(call, env)
+                    func = evaluate(call, env, singleScope)
                     params = func.args[1].args
                     # use captured environment if function has one
 
@@ -170,19 +164,9 @@ function evaluate(node, env::Dict=global_env)
                         for (param, arg) in zip(params, args)
                             addEnvBinding(env, string(param), arg)
                         end
-                        val = evaluate(func.args[2], env)
+                        val = evaluate(func.args[2], env, singleScope)
                         isMacro = false
                         return val
-                    end
-
-                    if(isFexpr && !isnothing(tempFexpr))
-                        fexprParams = tempFexpr.args[1].args
-                        evalenv = length(tempFexpr.args) >= 4 ? tempFexpr.args[4] : newEnv(env)
-                        for (param, arg) in zip(fexprParams, args)
-                            addEnvBinding(evalenv, string(param), arg)
-                        end
-                        DEBUG_ENV && debug_env(evalenv)
-                        return evaluate(tempFexpr.args[2], evalenv)
                     end
 
                     evalenv = length(func.args) >= 4 ? func.args[4] : newEnv(env)
@@ -190,9 +174,14 @@ function evaluate(node, env::Dict=global_env)
                         addEnvBinding(evalenv, string(param), arg)
                     end
                     DEBUG_ENV && debug_env(evalenv)
-                    return evaluate(func.args[2], evalenv)
+
+                    if isFexpr
+                        return evaluate(func.args[2], evalenv, tempEnv)
+                    else
+                        return evaluate(func.args[2], evalenv, singleScope)
+                    end
                     """
-                    returnEval = evaluate(func.args[2], temp)
+                    returnEval = evaluate(func.args[2], temp, singleScope)
                     isMacro = false
                     return returnEval
                     """
@@ -208,7 +197,7 @@ function evaluate(node, env::Dict=global_env)
                         addEnvBinding(temp, string(param), arg)
                     end
                     DEBUG_ENV && debug_env(temp)
-                    return evaluate(call.args[2], temp)
+                    return evaluate(call.args[2], temp, singleScope)
                 elseif call.head == :macro
                     error("🤔 macro")
                 else
@@ -219,38 +208,38 @@ function evaluate(node, env::Dict=global_env)
             end
 
         elseif node.head == :||
-            return evaluate(node.args[1], env) || evaluate(node.args[2], env)
+            return evaluate(node.args[1], env, singleScope) || evaluate(node.args[2], env, singleScope)
             """ TODO if not working, try this:
-            if evaluate(node.args[1], env)
-                return evaluate(node.args[1], env)
+            if evaluate(node.args[1], env, singleScope)
+                return evaluate(node.args[1], env, singleScope)
             else
-                evaluate(node.args[2], env)
+                evaluate(node.args[2], env, singleScope)
             end
             """
         elseif node.head == :&&
-            return evaluate(node.args[1], env) && evaluate(node.args[2], env)
+            return evaluate(node.args[1], env, singleScope) && evaluate(node.args[2], env, singleScope)
             """ TODO if not working, try this:
-            if evaluate(node.args[1], env)
-                return evaluate(node.args[2], env)
+            if evaluate(node.args[1], env, singleScope)
+                return evaluate(node.args[2], env, singleScope)
             else
-                return evaluate(node.args[1], env)
+                return evaluate(node.args[1], env, singleScope)
             end
             """
 
         elseif node.head == :if
-            return evaluate(node.args[1], env) ? evaluate(node.args[2], env) : evaluate(node.args[3], env)
+            return evaluate(node.args[1], env, singleScope) ? evaluate(node.args[2], env, singleScope) : evaluate(node.args[3], env, singleScope)
 
         elseif node.head == :block
             value = nothing
             for arg in node.args
-                value = evaluate(arg, env)
+                value = evaluate(arg, env, singleScope)
             end
             return value
 
         elseif node.head == :let
             inner = newEnv(env)
-            evaluate(node.args[1], inner) # assignment phase
-            return evaluate(node.args[2], inner) # block phase
+            evaluate(node.args[1], inner, singleScope) # assignment phase
+            return evaluate(node.args[2], inner, singleScope) # block phase
 
         elseif node.head == :global
             glob = node.args[1]
@@ -284,7 +273,7 @@ function evaluate(node, env::Dict=global_env)
             elseif glob.args[1] isa Symbol
                 # Global variable assignment (global x = 1)
                 name = string(glob.args[1])
-                value = evaluate(glob.args[2], env)
+                value = evaluate(glob.args[2], env, singleScope)
                 addEnvBinding(global_env, name, value)
                 DEBUG_ENV && debug_env(global_env)
                 return value
@@ -307,7 +296,7 @@ function evaluate(node, env::Dict=global_env)
                 if block.args[1] isa Expr && block.args[1].head == :let
                     # with captured environment (f(x) = let y = 1; x+y end)
                     capt = newEnv(env)
-                    evaluate(block.args[1].args[1], capt) # assignments only
+                    evaluate(block.args[1].args[1], capt, singleScope) # assignments only
                     lambda = Expr(:->, Expr(:tuple, params...), block.args[1].args[2], "func", capt)
                 else
                     # without captured environment (f(x) = x+1)
@@ -322,7 +311,7 @@ function evaluate(node, env::Dict=global_env)
                 params = node.args[2].args[2].args[1].args[1] isa Symbol ? [node.args[2].args[2].args[1].args[1]] : node.args[2].args[2].args[1].args
                 block = node.args[2].args[2].args[1].args[2]
                 capt = newEnv(env)
-                evaluate(node.args[2].args[1], capt) # assignments only
+                evaluate(node.args[2].args[1], capt, singleScope) # assignments only
                 lambda = Expr(:->, Expr(:tuple, params...), block, "func", capt)
                 addEnvBinding(env, name, lambda)
                 DEBUG_ENV && debug_env(env)
@@ -339,7 +328,7 @@ function evaluate(node, env::Dict=global_env)
             elseif node.args[1] isa Symbol
                 # Variable assignment (x = 1)
                 name = string(node.args[1])
-                value = evaluate(node.args[2], env)
+                value = evaluate(node.args[2], env, singleScope)
                 addEnvBinding(env, name, value)
                 DEBUG_ENV && debug_env(env)
                 return value
@@ -357,13 +346,13 @@ function evaluate(node, env::Dict=global_env)
             return Symbol("<fexpr>")
 
         elseif node.head == :quote
-            value = Meta.parse(reflect(node.args[1], env))
+            value = Meta.parse(reflect(node.args[1], env, singleScope))
             Base.remove_linenums!(value)
             return Expr(:quote, value)
 
         elseif node.head == :$
             val = getEnvBinding(env, string(node.args[1]))
-            return evaluate(val, env)
+            return evaluate(val, env, singleScope)
 
         elseif node.head == :$=          # Macro definition
             # node.args[1] = antes do $=
@@ -390,18 +379,18 @@ function evaluate(node, env::Dict=global_env)
 end
 
 
-function reflect(node, env::Dict) # Used for reflection to avoid evaluation of calls
+function reflect(node, env::Dict, singleScope::Dict) # Used for reflection to avoid evaluation of calls
     if node isa Symbol || node isa Number
         return string(node)
     elseif node isa String
         return "\"$(string(node))\""
     elseif node.head == :($)
-        return string(evaluate(node.args[1], env))
+        return string(evaluate(node.args[1], env, singleScope))
     elseif node isa Expr && node.head == :block
         final = string() * "("
         len = size(node.args, 1)
         for i in 1:len
-            final = final * reflect(node.args[i], env)
+            final = final * reflect(node.args[i], env, singleScope)
             if i == len
                 break
             end
@@ -410,16 +399,16 @@ function reflect(node, env::Dict) # Used for reflection to avoid evaluation of c
         final = final * ")"
         return final
     elseif node isa Expr && node.head == :(=)
-        return string("(", reflect(node.args[1], env), " = ",  reflect(node.args[2], env), ")")
+        return string("(", reflect(node.args[1], env, singleScope), " = ",  reflect(node.args[2], env, singleScope), ")")
         
     else
         len = size(node.args, 1)
         final = string() * "("
         if len == 2
-            final = final * string(node.args[1]) * "(" * reflect(node.args[2], env) * ")"
+            final = final * string(node.args[1]) * "(" * reflect(node.args[2], env, singleScope) * ")"
         else
             for i in 2:len
-                final = final * reflect(node.args[i], env)
+                final = final * reflect(node.args[i], env, singleScope)
                 if i == len
                     break
                 end
@@ -428,29 +417,6 @@ function reflect(node, env::Dict) # Used for reflection to avoid evaluation of c
         end
         final = final * ")"
         return final
-    end
-end
-
-function checkforeval(node, env::Dict)
-    if !(node isa Expr)
-        return
-    end
-    len = size(node.args, 1)
-    for i in 1:len
-        if node.args[i] isa Expr && node.args[i].head == :call && node.args[i].args[1] == :(eval)
-
-            #can't evaluate immediately for println
-            binding = getEnvBinding(env, string(node.args[i].args[2]))
-            if binding isa Expr && binding.args[1].args[1] == :(println)
-                return
-            end
-            
-            node.args[i] = evaluate(node.args[i], env)
-        elseif node.args[i] isa Expr && node.args[i].args[1] != :(eval)
-            checkforeval(node.args[i], env)
-        else
-            continue
-        end
     end
 end
 
@@ -496,6 +462,8 @@ function metajulia_repl()
         end
     end
 end
+
+metajulia_repl()
 
 end # module MetaJuliaREPL
 
