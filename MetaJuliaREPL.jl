@@ -170,7 +170,7 @@ function evaluate(node, env::Dict=global_env, singleScope::Dict=Dict{String,Any}
                     """
                     #println(">>>> ",call)
                     #println(env)
-                    func = evaluate(call, env)
+                    func = evaluate(call, env, singleScope)
                     params = func.args[1].args
                     # use captured environment if function has one
 
@@ -184,7 +184,7 @@ function evaluate(node, env::Dict=global_env, singleScope::Dict=Dict{String,Any}
                         #println("vou avaliar isto: ", string(func.args[2])[3:(end-1)])
                         #aa = Meta.parse(string(func.args[2]))
                         #Base.remove_linenums!(aa)
-                        val = evaluate(func.args[2], env)
+                        val = evaluate(func.args[2], env, singleScope)
                         isMacro = false
                         return val
                     end
@@ -235,7 +235,7 @@ function evaluate(node, env::Dict=global_env, singleScope::Dict=Dict{String,Any}
                     #end
                     #println(env)
                     #println("LE FUNCTION, ", leFunction)
-                    val = evaluate(leFunction.args[2], env)
+                    val = evaluate(leFunction.args[2], env, singleScope)
                     return val
                 else
                     error("Unsupported expression call: $call")
@@ -420,7 +420,7 @@ function evaluate(node, env::Dict=global_env, singleScope::Dict=Dict{String,Any}
             if(isMacro)
                 #println("WEEEEEEEEEE")
                 aaa = node.args[1]
-                return evaluate(aaa, env)
+                return evaluate(aaa, env, singleScope)
             end
             #println("UUUUUU")
             value = Meta.parse(reflect(node.args[1], env, singleScope))
@@ -476,7 +476,7 @@ function evaluate(node, env::Dict=global_env, singleScope::Dict=Dict{String,Any}
         
         elseif node.head == :quote
             #println("WTF", node.args)
-            return evaluate(node.args[1])
+            return evaluate(node.args[1], env, singleScope)
         else
             error("Unsupported expression head: $(node.head)")
         end
