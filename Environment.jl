@@ -4,7 +4,7 @@
 # ------------------------------------------------------------------------------
 
 module Environment
-export newEnv, addEnvBinding, hasEnvBinding, getEnvBinding
+export newEnv, addEnvBinding, hasEnvBinding, getEnvBinding, getEnvBindingSym, createGenSym, addEnvBindingSym 
 
 
 
@@ -43,6 +43,34 @@ function getEnvBinding(env::Dict, name::String)
     return getEnvBinding(env["#"], name)
 end
 
+function getSymLocation(env::Dict, name::String)
+    if hasEnvBinding(env, "/"*name)
+        return getEnvBinding(env, "/"*name)
+    end
+    return nothing
+end
 
+
+function getEnvBindingSym(env::Dict, name::String)
+    if hasEnvBinding(env, "/"*name)
+        addr = getEnvBinding(env, "/"*name)
+        return env[addr]
+    end
+    getEnvBinding(env, name)
+end
+
+function createGenSym(env::Dict, orignalName::String, newName::String)
+    env["/"*orignalName] = newName
+    env[newName] = ""
+end
+
+function addEnvBindingSym(env::Dict, name::String, node::Any)
+    if hasEnvBinding(env, "/"*name)
+        # existe uma 
+        addEnvBinding(env, getSymLocation(env, name), node)
+    else
+        return addEnvBinding(env, name, node)
+    end
+end
 
 end # module Environment
