@@ -113,10 +113,7 @@ function evaluate(node, env::Dict=global_env, singleScope::Dict=Dict{String,Any}
         return node
 
     elseif node isa Expr # Expressions
-        #isMacro = false
-        #println("[DEBUG] AST is: $(node)") #rm
-        #println("[DEBUG] AST head type: $(node.head)") #rm
-        #println("[DEBUG] AST args: $(node.args)") #rm
+        
         if node.head == :call  # Function calls
             call = node.args[1]
             global isMacro
@@ -159,7 +156,7 @@ function evaluate(node, env::Dict=global_env, singleScope::Dict=Dict{String,Any}
                 args = map(x -> evaluate(x, env, singleScope), node.args[2:end])
             end
 
-            if call isa Symbol # || isMacro
+            if call isa Symbol 
                 if call == :+
                     return sum(args)
                 elseif call == :-
@@ -197,6 +194,7 @@ function evaluate(node, env::Dict=global_env, singleScope::Dict=Dict{String,Any}
                     else
                         return evaluate(args[1], singleScope)
                     end
+
                 elseif call == :(println)
                     final = string()
                     for arg in args
@@ -209,39 +207,23 @@ function evaluate(node, env::Dict=global_env, singleScope::Dict=Dict{String,Any}
                         end
                     end
                     println(final)
+
                 elseif call == :(gensym)
-                    # println("GENSYM")
-                    # for i in args
-                    #     println("Arg: ", i)
-                    # end
+                    
                     sym = gensym("aaa")
-                    #println("type: ", typeof(sym))
-                    #println("value: ", sym)
+                    
                     return string(sym)
                 elseif hasEnvBinding(env, string(call)) # Defined functions
-                    """
-                    if (isMacro)
-                        temp = env
-                    else
-                        temp = newEnv(env)
-                    end
-                    """
-                    #println(">>>> ",call)
-                    #println(env)
+                    
                     func = evaluate(call, env, singleScope)
                     params = func.args[1].args
                     # use captured environment if function has one
 
-                    if(isMacro)
-                        #println("MACROOOOOO")
+                    if (isMacro)
                         for (param, arg) in zip(params, args)
                             addEnvBindingSym(env, string(param), arg)
                         end
-                        #println(env)
-                        #println("vou avaliar isto: ", string(func.args[2]))
-                        #println("vou avaliar isto: ", string(func.args[2])[3:(end-1)])
-                        #aa = Meta.parse(string(func.args[2]))
-                        #Base.remove_linenums!(aa)
+
                         val = evaluate(func.args[2], env, singleScope)
                         isMacro = false
                         return val
@@ -269,7 +251,6 @@ function evaluate(node, env::Dict=global_env, singleScope::Dict=Dict{String,Any}
 
             elseif call isa Expr
                 if call.head == :->     # Anonymous functions
-                    #println("lontrinha")
                     temp = newEnv(env)
                     params = call.args[1] isa Symbol ? [call.args[1]] : call.args[1].args
                     for (param, arg) in zip(params, args)
@@ -280,19 +261,9 @@ function evaluate(node, env::Dict=global_env, singleScope::Dict=Dict{String,Any}
                 elseif call.head == :macro
                     error("🤔 macro")
                 elseif call.head == :$
-                    #println("ccccccccc")
-                    #println("\$"*string(call))
-                    #println(call.args)
-                    #TODO Invocation
-                    #println(env)
-                    
 
                     leFunction = getEnvBindingSym(env, string(call.args[1]))
-                    #for (param, arg) in zip(params, args)
-                    #    addEnvBinding(env, string(param), arg)
-                    #end
-                    #println(env)
-                    #println("LE FUNCTION, ", leFunction)
+    
                     val = evaluate(leFunction.args[2], env, singleScope)
                     return val
                 else
@@ -304,22 +275,9 @@ function evaluate(node, env::Dict=global_env, singleScope::Dict=Dict{String,Any}
 
         elseif node.head == :||
             return evaluate(node.args[1], env, singleScope) || evaluate(node.args[2], env, singleScope)
-            """ TODO if not working, try this:
-            if evaluate(node.args[1], env, singleScope)
-                return evaluate(node.args[1], env, singleScope)
-            else
-                evaluate(node.args[2], env, singleScope)
-            end
-            """
+
         elseif node.head == :&&
             return evaluate(node.args[1], env, singleScope) && evaluate(node.args[2], env, singleScope)
-            """ TODO if not working, try this:
-            if evaluate(node.args[1], env, singleScope)
-                return evaluate(node.args[2], env, singleScope)
-            else
-                return evaluate(node.args[1], env, singleScope)
-            end
-            """
 
         elseif node.head == :if
             return evaluate(node.args[1], env, singleScope) ? evaluate(node.args[2], env, singleScope) : evaluate(node.args[3], env, singleScope)
@@ -457,14 +415,11 @@ function evaluate(node, env::Dict=global_env, singleScope::Dict=Dict{String,Any}
                 end
 
                 value = evaluate(node.args[2], env, singleScope)
-                #println("pppp ", size(node.args,1))
-                #println("qqqq ", typeof(node.args[2]))
+
                 if size(node.args,1) >= 2 && node.args[2] isa Expr && size(node.args[2].args,1) >= 1 && node.args[2].args[1] == :gensym
                     # special case where we need to change the env
-                    #println("lontrinha")
                     createGenSym(env, name, value)
-                    #addEnvBinding(env, "/"*name, value) # add variable generated by gensym
-                    #addEnvBinding(env, value, "") # add variable generated by gensym
+
                     DEBUG_ENV && debug_env(env)
                     return value
                 end
@@ -485,13 +440,12 @@ function evaluate(node, env::Dict=global_env, singleScope::Dict=Dict{String,Any}
             return Fexpr(name)
 
         elseif node.head == :quote
-            #println("OOOOOOOO")
-            if(isMacro)
-                #println("WEEEEEEEEEE")
+
+            if (isMacro)
                 aaa = node.args[1]
                 return evaluate(aaa, env, singleScope)
             end
-            #println("UUUUUU")
+
             value = Meta.parse(reflect(node.args[1], env, singleScope))
             Base.remove_linenums!(value)
 
@@ -509,33 +463,16 @@ function evaluate(node, env::Dict=global_env, singleScope::Dict=Dict{String,Any}
             return evaluate(val, env, singleScope)
 
         elseif node.head == :$=          # Macro definition
-            # node.args[1] = antes do $=
-            # node.args[2] = depois do $=
+
             name = string(node.args[1].args[1])
             params = node.args[1].args[2:end]
             body = node.args[2]
 
-            #ast2 = Meta.parse(body)
-            #println("PARSER, ", ast2.head)
-            #println("PARSER, ", ast2.args)
-
-
             teste = []
             push!(teste, body.head)
             for i in body.args
-                #println("ARG: ", i.args)
                 push!(teste, i)
             end
-            
-            #println(teste)
-
-
-
-
-
-            #println(Expr(:macro, Expr(:tuple, params...), :($(teste...),), "macro"))
-            #println(Expr(:macro, Expr(:tuple, params...), body.args..., "macro"))
-
 
             lambda = Expr(:macro, Expr(:tuple, params...), body, "macro")
 
@@ -545,7 +482,6 @@ function evaluate(node, env::Dict=global_env, singleScope::Dict=Dict{String,Any}
             return Macro(name)
         
         elseif node.head == :quote
-            #println("WTF", node.args)
             return evaluate(node.args[1], env, singleScope)
         else
             error("Unsupported expression head: $(node.head)")
@@ -623,6 +559,7 @@ function parse_input()
 end
 
 function metajulia_eval(input)
+
     if (input isa String)
         return string(input)
     end 
@@ -633,7 +570,7 @@ function metajulia_eval(input)
     if node isa Expr || node isa Number || node isa String || node isa Symbol || node isa QuoteNode
         # Evaluate the node and print the result
         result = evaluate(node)
-        # no printing for null values
+
         if result isa String
             return ("\"$(result)\"")
         end
@@ -649,9 +586,8 @@ function metajulia_eval(input)
         if result isa Expr && result.head == :quote
             return result.args[1]
         end
-        
+
         return result
-        #result isa String ? println("\"$(result)\"") : println(result)
 
     else
         error("Unsupported node type: $(typeof(node))")
