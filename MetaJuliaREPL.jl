@@ -49,8 +49,14 @@ end
 # -------------------------------------------------
 global isMacro = false
 function evaluate(node, env::Dict=global_env, singleScope::Dict=Dict{String,Any}("#" => nothing))
+    #println("[DEBUG] AST is:")
+    #debug_node(node) #rm
+    #println("env for this is")
+    #debug_env(env)
+    #println("singleScope for this is")
+    #debug_env(singleScope)
 
-    if isnothing(node) # null value
+    if isnothing(node) # null value3
         return
 
     elseif node isa Number || node isa String # Literals
@@ -59,6 +65,19 @@ function evaluate(node, env::Dict=global_env, singleScope::Dict=Dict{String,Any}
     elseif node isa Symbol # Variables
         name = string(node)
         result = getEnvBinding(env, name)
+
+        #for the eval keyword, create an eval function
+        if isnothing(result) && name == "eval"
+            node = Meta.parse("eval(x) = eval(x)")
+            name = string(node.args[1].args[1])
+            params = node.args[1].args[2:end]
+            block = Base.remove_linenums!(node.args[2])
+            lambda = Expr(:->, Expr(:tuple, params...), block, "func")
+            # adding eval to env
+            addEnvBindingSym(env, name, lambda)
+            result = getEnvBinding(env, name)
+        end
+        
         return isnothing(result) ? error("Name not found: $name") : result
 
     elseif node isa QuoteNode # Reflection
@@ -72,25 +91,36 @@ function evaluate(node, env::Dict=global_env, singleScope::Dict=Dict{String,Any}
         #println("[DEBUG] AST is: $(node)") #rm
         #println("[DEBUG] AST head type: $(node.head)") #rm
         #println("[DEBUG] AST args: $(node.args)") #rm
-        #println("[DEBUG] ", env) #rm
         if node.head == :call  # Function calls
             call = node.args[1]
             global isMacro
             tempEnv = copy(env)
 
-            # needed to define fexpr args as quotes instead of calls
             isFexpr = false
+            isGlobal = false
             if !isMacro
-                if !isnothing(getEnvBinding(env, string(call))) && evaluate(call, env, singleScope).args[3] == "fexpr"
-                    isFexpr = true
-                    len = size(node.args, 1)
-                    for i in 2:len
-                        if node.args[i] isa Expr && node.args[i].head != :quote
-                            println("fexpr arg before ", node.args[i])
-                            node.args[i] = Expr(:quote, node.args[i])
-                            println("fexpr arg after ", node.args[i])
+                if hasEnvBinding(env, string(call)) && evaluate(call, env, singleScope) isa Expr
+                    func = evaluate(call, env, singleScope)
+                    # needed to define fexpr args as quotes instead of calls
+                    if func.args[3] == "fexpr"
+                        isFexpr = true
+                        len = size(node.args, 1)
+                        for i in 2:len
+                            if node.args[i] isa Expr && node.args[i].head != :quote
+                                node.args[i] = Expr(:quote, node.args[i])
+                            end
+                        end
+                    elseif size(func.args, 1) == 4
+                        isGlobal = true
+                        capEnv = func.args[4]
+                        for (key, value) in capEnv
+                            if hasEnvBinding(tempEnv, key)
+                                continue
+                            end
+                            addEnvBinding(tempEnv, key, value)
                         end
                     end
+                    
                 end
             end
 
@@ -196,7 +226,7 @@ function evaluate(node, env::Dict=global_env, singleScope::Dict=Dict{String,Any}
                     end
                     DEBUG_ENV && debug_env(evalenv)
 
-                    if isFexpr
+                    if isFexpr || isGlobal
                         return evaluate(func.args[2], evalenv, tempEnv)
                     else
                         return evaluate(func.args[2], evalenv, singleScope)
@@ -298,6 +328,17 @@ function evaluate(node, env::Dict=global_env, singleScope::Dict=Dict{String,Any}
                     DEBUG_ENV && debug_env(global_env)
                     return Symbol("<function>")
                 end
+            elseif glob.args[1] isa Symbol && glob.args[2] isa Expr && glob.args[2].head == :call
+                # Global function assignment to a variable (global f = id(x))
+                name = string(glob.args[1])
+                value = evaluate(glob.args[2], env, singleScope)
+                params = value.args[1]
+                block = value.args[2]
+                def = value.args[3]
+                lambda = Expr(:->, params, block, def, env)
+                addEnvBinding(global_env, name, lambda)
+                DEBUG_ENV && debug_env(global_env)
+                return Symbol("<function>")
             elseif glob.args[2] isa Expr && glob.args[2].head == :->
                 # Global anonymous function assignment (global f = x -> x+1)
                 name = string(glob.args[1])
@@ -426,6 +467,7 @@ function evaluate(node, env::Dict=global_env, singleScope::Dict=Dict{String,Any}
             #println("UUUUUU")
             value = Meta.parse(reflect(node.args[1], env, singleScope))
             Base.remove_linenums!(value)
+
             return Expr(:quote, value)
 
         elseif node.head == :$
@@ -573,7 +615,7 @@ function metajulia_repl()
     end
 end
 
-#metajulia_repl()
+metajulia_repl()
 
 end # module MetaJuliaREPL
 
