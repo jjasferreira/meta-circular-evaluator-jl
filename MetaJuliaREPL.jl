@@ -110,6 +110,7 @@ function evaluate(node, env::Dict=global_env, singleScope::Dict=Dict{String,Any}
                                 node.args[i] = Expr(:quote, node.args[i])
                             end
                         end
+                    # needed to ensure that args are evaluated with the global function's captured env
                     elseif size(func.args, 1) == 4
                         isGlobal = true
                         capEnv = func.args[4]
@@ -226,7 +227,7 @@ function evaluate(node, env::Dict=global_env, singleScope::Dict=Dict{String,Any}
                     end
                     DEBUG_ENV && debug_env(evalenv)
 
-                    if isFexpr || isGlobal
+                    if isFexpr || isGlobal # if evals are called inside the function block, uses tempEnv
                         return evaluate(func.args[2], evalenv, tempEnv)
                     else
                         return evaluate(func.args[2], evalenv, singleScope)
@@ -532,11 +533,13 @@ end
 
 
 function reflect(node, env::Dict, singleScope::Dict) # Used for reflection to avoid evaluation of calls
+    # creates a string to be evaluated by the parser
     if node isa Symbol || node isa Number
         return string(node)
     elseif node isa String
         return "\"$(string(node))\""
     elseif node.head == :($)
+        # evaluates the Expr inside $() and adds it to the string
         return string(evaluate(node.args[1], env, singleScope))
     elseif node isa Expr && node.head == :block
         final = string() * "("
@@ -554,6 +557,7 @@ function reflect(node, env::Dict, singleScope::Dict) # Used for reflection to av
         return string("(", reflect(node.args[1], env, singleScope), " = ",  reflect(node.args[2], env, singleScope), ")")
         
     else
+        # if node only has one arg, then it is a function call
         len = size(node.args, 1)
         final = string() * "("
         if len == 2
@@ -614,8 +618,6 @@ function metajulia_repl()
         end
     end
 end
-
-metajulia_repl()
 
 end # module MetaJuliaREPL
 
