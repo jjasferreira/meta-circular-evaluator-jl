@@ -5,6 +5,32 @@ using .Environment
 
 global_env = Dict{String,Any}("#" => nothing)
 
+struct Function
+    data::String
+end
+
+function Base.show(io::IO, x::Function)
+    print(io, "<function>")
+end
+
+struct Fexpr
+    data::String
+end
+
+function Base.show(io::IO, x::Fexpr)
+    print(io, "<fexpr>")
+end
+
+struct Macro
+    data::String
+end
+
+function Base.show(io::IO, x::Macro)
+    print(io, "<macro>")
+end
+
+
+
 # -------------------------------------------------
 # DEBUG
 # -------------------------------------------------
@@ -322,12 +348,12 @@ function evaluate(node, env::Dict=global_env, singleScope::Dict=Dict{String,Any}
                     lambda = Expr(:->, Expr(:tuple, params...), block, "fexpr", env)
                     addEnvBinding(global_env, name, lambda)
                     DEBUG_ENV && debug_env(global_env)
-                    return Symbol("<fexpr>")
+                    return Fexpr(name)
                 else # for functions
                     lambda = Expr(:->, Expr(:tuple, params...), block, "func", env)
                     addEnvBinding(global_env, name, lambda)
                     DEBUG_ENV && debug_env(global_env)
-                    return Symbol("<function>")
+                    return Function(name)
                 end
             elseif glob.args[1] isa Symbol && glob.args[2] isa Expr && glob.args[2].head == :call
                 # Global function assignment to a variable (global f = id(x))
@@ -339,7 +365,7 @@ function evaluate(node, env::Dict=global_env, singleScope::Dict=Dict{String,Any}
                 lambda = Expr(:->, params, block, def, env)
                 addEnvBinding(global_env, name, lambda)
                 DEBUG_ENV && debug_env(global_env)
-                return Symbol("<function>")
+                return Function(name)
             elseif glob.args[2] isa Expr && glob.args[2].head == :->
                 # Global anonymous function assignment (global f = x -> x+1)
                 name = string(glob.args[1])
@@ -349,7 +375,7 @@ function evaluate(node, env::Dict=global_env, singleScope::Dict=Dict{String,Any}
                 lambda = Expr(:->, Expr(:tuple, params...), block, "func", env)
                 addEnvBinding(global_env, name, lambda)
                 DEBUG_ENV && debug_env(global_env)
-                return Symbol("<function>")
+                return Function(name)
             elseif glob.args[1] isa Symbol
                 # Global variable assignment (global x = 1)
                 name = string(glob.args[1])
@@ -391,7 +417,7 @@ function evaluate(node, env::Dict=global_env, singleScope::Dict=Dict{String,Any}
                 end
                 addEnvBindingSym(env, name, lambda)
                 DEBUG_ENV && debug_env(env)
-                return Symbol("<function>")
+                return Function(name)
             elseif node.args[2] isa Expr && node.args[2].head == :let && node.args[2].args[2].args[1].head == :->
                 # Anonymous function assignment with captured environment (f = let y = 1; x -> y=x+y end)
                 name = string(node.args[1])
@@ -407,7 +433,7 @@ function evaluate(node, env::Dict=global_env, singleScope::Dict=Dict{String,Any}
                 lambda = Expr(:->, Expr(:tuple, params...), block, "func", capt)
                 addEnvBindingSym(env, name, lambda)
                 DEBUG_ENV && debug_env(env)
-                return Symbol("<function>")
+                return Function(name)
             elseif node.args[2] isa Expr && node.args[2].head == :->
                 # Anonymous function assignment without captured environment (f = x -> x+1)
                 name = string(node.args[1])
@@ -421,7 +447,7 @@ function evaluate(node, env::Dict=global_env, singleScope::Dict=Dict{String,Any}
                 lambda = Expr(:->, Expr(:tuple, params...), block, "func")
                 addEnvBindingSym(env, name, lambda)
                 DEBUG_ENV && debug_env(env)
-                return Symbol("<function>")
+                return Function(name)
             elseif node.args[1] isa Symbol
                 # Variable assignment (x = 1)
                 name = string(node.args[1])
@@ -456,7 +482,7 @@ function evaluate(node, env::Dict=global_env, singleScope::Dict=Dict{String,Any}
             lambda = Expr(:->, Expr(:tuple, params...), block, "fexpr")
             addEnvBinding(env, name, lambda)
             DEBUG_ENV && debug_env(env)
-            return Symbol("<fexpr>")
+            return Fexpr(name)
 
         elseif node.head == :quote
             #println("OOOOOOOO")
@@ -516,7 +542,7 @@ function evaluate(node, env::Dict=global_env, singleScope::Dict=Dict{String,Any}
             addEnvBinding(env, name, lambda)
             DEBUG_ENV && debug_env(temp)
 
-            return Symbol("<macro>")
+            return Macro(name)
         
         elseif node.head == :quote
             #println("WTF", node.args)
@@ -596,6 +622,37 @@ function parse_input()
     return node
 end
 
+function metajulia_eval(input)
+    if (input isa String)
+        return string(input)
+    end 
+
+    node = Meta.parse(string(input))
+    Base.remove_linenums!(node)
+
+    if node isa Expr || node isa Number || node isa String || node isa Symbol || node isa QuoteNode
+        # Evaluate the node and print the result
+        result = evaluate(node)
+        # no printing for null values
+        if result isa String
+            return ("\"$(result)\"")
+
+        elseif isnothing(result)
+            result = ""
+        end
+        
+        if result isa QuoteNode
+            return result.value
+        end
+
+        return result
+        #result isa String ? println("\"$(result)\"") : println(result)
+
+    else
+        error("Unsupported node type: $(typeof(node))")
+    end
+end
+
 function metajulia_repl()
     while true
         node = parse_input()
@@ -619,6 +676,16 @@ function metajulia_repl()
     end
 end
 
+#metajulia_repl()
+#metajulia_eval(:(:foo))
+
 end # module MetaJuliaREPL
 
+metajulia_eval(input) = Main.MetaJuliaREPL.metajulia_eval(input)
+
 metajulia_repl() = Main.MetaJuliaREPL.metajulia_repl()
+
+#metajulia_eval(:("lontrinha"))
+#metajulia_repl()
+include("test.jl")
+using .Test
