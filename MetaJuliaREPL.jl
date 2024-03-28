@@ -99,7 +99,7 @@ function evaluate(node, env::Dict=global_env, singleScope::Dict=Dict{String,Any}
         if isnothing(result) && name == "eval"
             return createEval(node, env, singleScope)
         end
-        
+
         return isnothing(result) ? error("Name not found: $name") : result
 
     elseif node isa QuoteNode # Reflection
@@ -120,6 +120,8 @@ function evaluate(node, env::Dict=global_env, singleScope::Dict=Dict{String,Any}
 
         elseif node.head == :if
             return evaluate(node.args[1], env, singleScope) ? evaluate(node.args[2], env, singleScope) : evaluate(node.args[3], env, singleScope)
+        elseif node.head == :elseif
+            return evaluate(node.args[1].args[1], env, singleScope) ? evaluate(node.args[2], env, singleScope) : evaluate(node.args[3], env, singleScope)
 
         elseif node.head == :block
             value = nothing
@@ -150,14 +152,14 @@ function evaluate(node, env::Dict=global_env, singleScope::Dict=Dict{String,Any}
 
         elseif node.head == :quote
             return quoteEvaluator(node, env, singleScope)
-        
+
         elseif node.head == :$ # Macro variable resolver
             val = getEnvBindingSym(env, string(node.args[1]))
             return evaluate(val, env, singleScope)
 
         elseif node.head == :$= # Macro Definition
             return macroDefinitionEvaluator(node, env, singleScope)
-        
+
         elseif node.head == :quote
             return evaluate(node.args[1], env, singleScope)
 
@@ -165,7 +167,7 @@ function evaluate(node, env::Dict=global_env, singleScope::Dict=Dict{String,Any}
             error("Unsupported expression head: $(node.head)")
         end
 
-        
+
     else
         error("Unsupported node type: $(typeof(node))")
     end
@@ -196,7 +198,7 @@ function functionCallEvaluator(node, env::Dict=global_env, singleScope::Dict=Dic
                         node.args[i] = Expr(:quote, node.args[i])
                     end
                 end
-            # needed to ensure that args are evaluated with the global function's captured env
+                # needed to ensure that args are evaluated with the global function's captured env
             elseif size(func.args, 1) == 4
                 isGlobal = true
                 capEnv = func.args[4]
@@ -207,7 +209,7 @@ function functionCallEvaluator(node, env::Dict=global_env, singleScope::Dict=Dic
                     addEnvBinding(tempEnv, key, value)
                 end
             end
-            
+
         end
     end
 
@@ -222,7 +224,7 @@ function functionCallEvaluator(node, env::Dict=global_env, singleScope::Dict=Dic
         args = map(x -> evaluate(x, env, singleScope), node.args[2:end])
     end
 
-    if call isa Symbol 
+    if call isa Symbol
 
         # 
         # Predefined functions
@@ -282,9 +284,9 @@ function functionCallEvaluator(node, env::Dict=global_env, singleScope::Dict=Dic
             sym = gensym("aaa")
             return string(sym)
 
-        # 
-        # Custom functions
-        # 
+            # 
+            # Custom functions
+            # 
         elseif hasEnvBinding(env, string(call))
             func = evaluate(call, env, singleScope)
             params = func.args[1].args
@@ -311,13 +313,13 @@ function functionCallEvaluator(node, env::Dict=global_env, singleScope::Dict=Dic
             else
                 return evaluate(func.args[2], evalenv, singleScope)
             end
-            
+
         else
             error("Unsupported symbol call: $call")
         end
 
     elseif call isa Expr
-        
+
         # 
         # Anonymous functions
         # 
@@ -329,10 +331,10 @@ function functionCallEvaluator(node, env::Dict=global_env, singleScope::Dict=Dic
             end
             DEBUG_ENV && debug_env(temp)
             return evaluate(call.args[2], temp, singleScope)
-        
-        # 
-        # Macro-defined functions
-        # 
+
+            # 
+            # Macro-defined functions
+            # 
         elseif call.head == :$
             func = getEnvBindingSym(env, string(call.args[1]))
             val = evaluate(func.args[2], env, singleScope)
@@ -408,7 +410,7 @@ end
 
 """This function evaluates all assignments (except globals)"""
 function assignmentEvaluator(node, env::Dict=global_env, singleScope::Dict=Dict{String,Any}("#" => nothing))
-    
+
     # 
     # Function assignment (f(x) = ...)
     # 
@@ -439,10 +441,10 @@ function assignmentEvaluator(node, env::Dict=global_env, singleScope::Dict=Dict{
         DEBUG_ENV && debug_env(env)
         return Function(name)
 
-    # 
-    # Anonymous function assignment with captured environment 
-    # (f = let y = 1; x -> y=x+y end)
-    # 
+        # 
+        # Anonymous function assignment with captured environment 
+        # (f = let y = 1; x -> y=x+y end)
+        # 
     elseif node.args[2] isa Expr && node.args[2].head == :let && node.args[2].args[2].args[1].head == :->
         name = string(node.args[1])
 
@@ -459,10 +461,10 @@ function assignmentEvaluator(node, env::Dict=global_env, singleScope::Dict=Dict{
         DEBUG_ENV && debug_env(env)
         return Function(name)
 
-    # 
-    # Anonymous function assignment without captured environment 
-    # (f = x -> x+1)
-    # 
+        # 
+        # Anonymous function assignment without captured environment 
+        # (f = x -> x+1)
+        # 
     elseif node.args[2] isa Expr && node.args[2].head == :->
         name = string(node.args[1])
 
@@ -477,9 +479,9 @@ function assignmentEvaluator(node, env::Dict=global_env, singleScope::Dict=Dict{
         DEBUG_ENV && debug_env(env)
         return Function(name)
 
-    # 
-    # Variable assignment (x = 1)
-    # 
+        # 
+        # Variable assignment (x = 1)
+        # 
     elseif node.args[1] isa Symbol
         name = string(node.args[1])
 
@@ -489,7 +491,7 @@ function assignmentEvaluator(node, env::Dict=global_env, singleScope::Dict=Dict{
 
         value = evaluate(node.args[2], env, singleScope)
 
-        if size(node.args,1) >= 2 && node.args[2] isa Expr && size(node.args[2].args,1) >= 1 && node.args[2].args[1] == :gensym
+        if size(node.args, 1) >= 2 && node.args[2] isa Expr && size(node.args[2].args, 1) >= 1 && node.args[2].args[1] == :gensym
             # special case where we need to change the env
             createGenSym(env, name, value)
 
@@ -507,7 +509,7 @@ end
 
 
 """Used for reflection to avoid evaluation of calls"""
-function reflect(node, env::Dict, singleScope::Dict) 
+function reflect(node, env::Dict, singleScope::Dict)
     # creates a string to be evaluated by the parser
     if node isa Symbol || node isa Number
         return string(node)
@@ -533,8 +535,8 @@ function reflect(node, env::Dict, singleScope::Dict)
         return final
 
     elseif node isa Expr && node.head == :(=)
-        return string("(", reflect(node.args[1], env, singleScope), " = ",  reflect(node.args[2], env, singleScope), ")")
-        
+        return string("(", reflect(node.args[1], env, singleScope), " = ", reflect(node.args[2], env, singleScope), ")")
+
     else
         # if node only has one arg, then it is a function call
         len = size(node.args, 1)
@@ -634,7 +636,7 @@ function metajulia_eval(input)
 
     if (input isa String)
         return string(input)
-    end 
+    end
 
     node = Meta.parse(string(input))
     Base.remove_linenums!(node)
@@ -654,11 +656,11 @@ function metajulia_eval(input)
         if isnothing(result)
             result = ""
         end
-        
+
         if result isa QuoteNode
             return result.value
         end
-        
+
         if result isa Expr && result.head == :quote
             return result.args[1]
         end
