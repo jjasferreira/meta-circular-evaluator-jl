@@ -160,13 +160,9 @@ function evaluate(node, env::Dict=global_env, singleScope::Dict=Dict{String,Any}
         elseif node.head == :$= # Macro Definition
             return macroDefinitionEvaluator(node, env, singleScope)
 
-        elseif node.head == :quote
-            return evaluate(node.args[1], env, singleScope)
-
         else
             error("Unsupported expression head: $(node.head)")
         end
-
 
     else
         error("Unsupported node type: $(typeof(node))")
