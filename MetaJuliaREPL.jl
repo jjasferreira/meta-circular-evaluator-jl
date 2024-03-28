@@ -165,8 +165,6 @@ function evaluate(node, env::Dict=global_env, singleScope::Dict=Dict{String,Any}
             error("Unsupported expression head: $(node.head)")
         end
 
-    elseif isnothing(node)
-        return
         
     else
         error("Unsupported node type: $(typeof(node))")
@@ -598,7 +596,7 @@ function quoteEvaluator(node, env::Dict=global_env, singleScope::Dict=Dict{Strin
     return Expr(:quote, value)
 end
 
-
+"""This function creates an eval function"""
 function createEval(node, env::Dict=global_env, singleScope::Dict=Dict{String,Any}("#" => nothing))
     node = Meta.parse("eval(x) = eval(x)")
     name = string(node.args[1].args[1])
