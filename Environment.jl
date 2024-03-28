@@ -1,10 +1,6 @@
-# ------------------------------------------------------------------------------
-# Notas do prof: LISTAS DE LISTAS COM OS BOUNDS!
-#                DO JULIA PADRÃO SO CONSEGUIMOS USAR AS PRIMITIVAS
-# ------------------------------------------------------------------------------
-
 module Environment
-export newEnv, addEnvBinding, hasEnvBinding, getEnvBinding, getEnvBindingSym, createGenSym, addEnvBindingSym 
+
+export newEnv, addEnvBinding, hasEnvBinding, getEnvBinding, createGenSym, addEnvBindingSym, getEnvBindingSym
 
 
 
@@ -19,6 +15,7 @@ end
 function addEnvBinding(env::Dict, name::String, node::Any)
     env[name] = node
 end
+
 
 
 """Checks if a name is bound in the environment"""
@@ -43,34 +40,38 @@ function getEnvBinding(env::Dict, name::String)
     return getEnvBinding(env["#"], name)
 end
 
-function getSymLocation(env::Dict, name::String)
-    if hasEnvBinding(env, "/"*name)
-        return getEnvBinding(env, "/"*name)
-    end
-    return nothing
-end
 
 
-function getEnvBindingSym(env::Dict, name::String)
-    if hasEnvBinding(env, "/"*name)
-        addr = getEnvBinding(env, "/"*name)
-        return env[addr]
-    end
-    getEnvBinding(env, name)
-end
-
-function createGenSym(env::Dict, orignalName::String, newName::String)
-    env["/"*orignalName] = newName
+"""Creates a new symbolic binding in the environment"""
+function createGenSym(env::Dict, originalName::String, newName::String)
+    env["/"*originalName] = newName
     env[newName] = ""
 end
 
+
+
+"""Adds a binding to a name in the environment. If there is a
+symbolic binding for the name, it uses the symbolic binding instead"""
 function addEnvBindingSym(env::Dict, name::String, node::Any)
-    if hasEnvBinding(env, "/"*name)
-        # existe uma 
-        addEnvBinding(env, getSymLocation(env, name), node)
+    if hasEnvBinding(env, "/" * name)
+        name = getEnvBinding(env, "/" * name)
+    end
+    addEnvBinding(env, name, node)
+end
+
+
+
+"""Retrieves the node bound to a name in the environment. If there is a
+symbolic binding for the name, it uses the symbolic binding instead"""
+function getEnvBindingSym(env::Dict, name::String)
+    if hasEnvBinding(env, "/" * name)
+        addr = getEnvBinding(env, "/" * name)
+        return env[addr]
     else
-        return addEnvBinding(env, name, node)
+        return getEnvBinding(env, name)
     end
 end
+
+
 
 end # module Environment

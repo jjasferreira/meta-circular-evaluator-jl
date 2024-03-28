@@ -95,9 +95,9 @@ function evaluate(node, env::Dict=global_env, singleScope::Dict=Dict{String,Any}
         name = string(node)
         result = getEnvBinding(env, name)
 
-        #for the eval keyword, create an eval function
+        # for the eval keyword, create an eval function
         if isnothing(result) && name == "eval"
-            return createEval(node, env, singleScope)
+            return createEval(env, singleScope)
         end
 
         return isnothing(result) ? error("Name not found: $name") : result
@@ -587,7 +587,7 @@ end
 
 """This function evaluates quotes"""
 function quoteEvaluator(node, env::Dict=global_env, singleScope::Dict=Dict{String,Any}("#" => nothing))
-    if (isMacro)
+    if isMacro
         macroExpr = node.args[1]
         return evaluate(macroExpr, env, singleScope)
     end
@@ -599,15 +599,13 @@ function quoteEvaluator(node, env::Dict=global_env, singleScope::Dict=Dict{Strin
 end
 
 """This function creates an eval function"""
-function createEval(node, env::Dict=global_env, singleScope::Dict=Dict{String,Any}("#" => nothing))
+function createEval(env::Dict=global_env, singleScope::Dict=Dict{String,Any}("#" => nothing))
     node = Meta.parse("eval(x) = eval(x)")
     name = string(node.args[1].args[1])
     params = node.args[1].args[2:end]
     block = Base.remove_linenums!(node.args[2])
     lambda = Expr(:->, Expr(:tuple, params...), block, "func")
-    # adding eval to env
     addEnvBindingSym(env, name, lambda)
-    result = getEnvBinding(env, name)
 end
 
 
@@ -634,7 +632,7 @@ end
 
 function metajulia_eval(input)
 
-    if (input isa String)
+    if input isa String
         return string(input)
     end
 
@@ -648,7 +646,6 @@ function metajulia_eval(input)
         #
         # Pretty-Printing for unit testing
         #
-
         if result isa String
             return ("\"$(result)\"")
         end
@@ -696,11 +693,12 @@ function metajulia_repl()
     end
 end
 
+
+
 end # module MetaJuliaREPL
 
 metajulia_eval(input) = Main.MetaJuliaREPL.metajulia_eval(input)
 
 metajulia_repl() = Main.MetaJuliaREPL.metajulia_repl()
 
-include("test.jl")
-using .Test
+include("Test.jl")
